@@ -1,14 +1,16 @@
-name: Build (Win/Linux/macOS) ➜ commit to builds branch
+name: Build (Win/Linux/macOS) ➜ commit win/, linux/, mac/ to `builds` branch
 
 on:
   workflow_dispatch:
   push:
     branches: ["main"]
     paths-ignore:
-      - "builds/**"   # коммиты бинарей не триггерят этот workflow
+      - "win/**"
+      - "linux/**"
+      - "mac/**"
 
 permissions:
-  contents: write      # нужно, чтобы пушить в репозиторий
+  contents: write
 
 jobs:
   build:
@@ -39,13 +41,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pygame pyinstaller
-          # Если на Windows используешь PNG как --icon (PyInstaller конвертирует через Pillow), раскомментируй:
+          # Если на Windows указываешь PNG как --icon и хочешь автоконверсию в ICO, добавь:
           # if [ "$RUNNER_OS" = "Windows" ]; then pip install pillow; fi
 
-      - name: Build via build_match.py
+      - name: Show tree (pre-build)
         shell: bash
         run: |
-          # запускаем твой скрипт из корня репозитория
+          pwd
+          ls -la
+          ls -la assets_common || true
+
+      - name: Build via build_MATCH.py
+        shell: bash
+        run: |
           python build_MATCH.py --name MATCH --version "${GITHUB_REF_NAME:-$GITHUB_SHA}" --clean
 
       - name: Sanity print
@@ -71,7 +79,7 @@ jobs:
           if-no-files-found: error
 
   publish-to-builds-branch:
-    name: Commit builds/ to `builds` branch
+    name: Commit win/, linux/, mac/ to `builds` branch
     needs: build
     runs-on: ubuntu-latest
 
@@ -91,7 +99,7 @@ jobs:
         run: |
           set -e
 
-          # переключаемся на ветку builds (или создаём её как orphan)
+          # перейти/создать ветку builds
           if git ls-remote --exit-code --heads origin builds >/dev/null 2>&1; then
             git checkout builds
           else
@@ -99,20 +107,19 @@ jobs:
             git rm -rf . 2>/dev/null || true
           fi
 
-          # чистим целевые каталоги и раскладываем свежие сборки
-          rm -rf
+          # очистить и создать целевые корневые папки
+          rm -rf win linux mac
           mkdir -p win linux mac
 
-          # артефакты: MATCH-win, MATCH-linux, MATCH-mac
-          [ -d "_artifacts/MATCH-win" ]   && cp -a _artifacts/MATCH-win/.   builds/win/
-          [ -d "_artifacts/MATCH-linux" ] && cp -a _artifacts/MATCH-linux/. builds/linux/
-          [ -d "_artifacts/MATCH-mac" ]   && cp -a _artifacts/MATCH-mac/.   builds/mac/
+          # разложить артефакты (названия соответствуют job-именам)
+          [ -d "_artifacts/MATCH-win" ]   && cp -a _artifacts/MATCH-win/.   win/
+          [ -d "_artifacts/MATCH-linux" ] && cp -a _artifacts/MATCH-linux/. linux/
+          [ -d "_artifacts/MATCH-mac" ]   && cp -a _artifacts/MATCH-mac/.   mac/
 
-          echo "Tree on builds branch (top):"
-          ls -la
-          echo "builds/win:"   && ls -la builds/win   || true
-          echo "builds/linux:" && ls -la builds/linux || true
-          echo "builds/mac:"   && ls -la builds/mac   || true
+          echo "Root of builds branch:" && ls -la
+          echo "win/:   " && ls -la win   || true
+          echo "linux/: " && ls -la linux || true
+          echo "mac/:   " && ls -la mac   || true
 
       - name: Commit & push to `builds`
         env:
@@ -123,10 +130,10 @@ jobs:
         shell: bash
         run: |
           set -e
-          git add builds
+          git add win linux mac
           if git diff --cached --quiet; then
-            echo "No changes to commit in builds/, skipping."
+            echo "No changes to commit, skipping."
             exit 0
           fi
-          git commit -m "ci: update builds/ ($(date -u +'%Y-%m-%dT%H:%M:%SZ')) [skip ci]"
+          git commit -m "ci: update win/, linux/, mac/ ($(date -u +'%Y-%m-%dT%H:%M:%SZ')) [skip ci]"
           git push origin builds
