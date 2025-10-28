@@ -37,13 +37,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pygame pyinstaller
-          # Для Windows: если иконка указывается PNG, PyInstaller конвертирует через Pillow:
           if [ "${{ runner.os }}" = "Windows" ]; then pip install pillow; fi
         shell: bash
 
       - name: Build via tools/build.py
         run: |
-          python tools/build.py --name MATCH --version "${{ github.ref_name || github.sha }}" --clean
+          python build_match.py --name MATCH --version "${{ github.ref_name || github.sha }}" --clean
 
       - name: Sanity print
         run: |
@@ -76,45 +75,20 @@ jobs:
       - name: Prepare working tree on `builds` branch
         run: |
           set -e
-          # Проверим, существует ли удалённая ветка builds
           if git ls-remote --exit-code --heads origin builds >/dev/null 2>&1; then
             git checkout builds
           else
-            # Создаём орфан-ветку с нуля
             git checkout --orphan builds
-            # Удалим всё из индекса и рабочей директории (только рабочее дерево)
             git rm -rf . 2>/dev/null || true
           fi
 
-          # Очистим и пересоздадим целевые папки
           rm -rf builds
           mkdir -p builds/win builds/linux builds/mac
 
-          # Разложим артефакты по папкам
-          # Внутри _artifacts/ будут папки MATCH-win, MATCH-linux, MATCH-mac
           if [ -d "_artifacts/MATCH-win" ];   then cp -a _artifacts/MATCH-win/.   builds/win/;   fi
           if [ -d "_artifacts/MATCH-linux" ]; then cp -a _artifacts/MATCH-linux/. builds/linux/; fi
           if [ -d "_artifacts/MATCH-mac" ];   then cp -a _artifacts/MATCH-mac/.   builds/mac/;   fi
 
-          # --- Если нужно оставить ТОЛЬКО исполняемый файл и _internal, раскомментируй блоки ниже ---
-          # Windows (оставить MATCH.exe и каталог _internal; подчистить остальное на верхнем уровне)
-          # if [ -d builds/win ]; then
-          #   find builds/win -maxdepth 1 -type f ! -name 'MATCH.exe' -delete
-          #   find builds/win -mindepth 1 -maxdepth 1 -type d ! -name '_internal' -exec rm -rf {} +
-          # fi
-          #
-          # Linux (оставить бинарь MATCH и каталог _internal, если он есть)
-          # if [ -d builds/linux ]; then
-          #   find builds/linux -maxdepth 1 -type f ! -name 'MATCH' -delete
-          #   find builds/linux -mindepth 1 -maxdepth 1 -type d ! -name '_internal' -exec rm -rf {} +
-          # fi
-          #
-          # macOS (оставить только MATCH.app)
-          # if [ -d builds/mac ]; then
-          #   find builds/mac -mindepth 1 -maxdepth 1 ! -name 'MATCH.app' -exec rm -rf {} +
-          # fi
-
-          # Статус
           echo "Tree on builds branch:"
           ls -la
           echo "builds/win:"
