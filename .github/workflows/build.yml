@@ -3,12 +3,12 @@ name: Build (Win/Linux/macOS) ➜ commit to `builds` branch
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]        # автозапуск при пушах в main
+    branches: ["main"]
     paths-ignore:
-      - "builds/**"           # не реагировать на изменения внутри builds/
+      - "builds/**"
 
 permissions:
-  contents: write             # нужно, чтобы пушить в repo
+  contents: write
 
 jobs:
   build:
