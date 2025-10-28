@@ -1,110 +1,44 @@
-﻿#!/usr/bin/env python3
-import argparse
-import os
-import platform
-import shutil
-import subprocess
-import sys
 from pathlib import Path
+import sys, subprocess, shutil
 
-ROOT = Path(__file__).resolve().parent  # корень репо
-DIST = ROOT / "dist"
+ROOT  = Path(__file__).resolve().parent
+DIST  = ROOT / "dist"
 BUILD = ROOT / "build"
-SPEC = ROOT / "MATCH.spec"  # необязательно; собираем по .py
-SRC_ENTRY = ROOT / "MATCH.py"  # точка входа
-ASSETS_COMMON = ROOT / "assets_common"
-ASSETS_STAGE = ROOT / "assets_stage"  # временная папка: попадёт в сборку как assets/
 
-ICONS = {
-    "Windows": ROOT / "assets_win" / "icon.ico",
-    "Darwin":  ROOT / "assets_mac" / "icon.icns",
-    "Linux":   ROOT / "assets_linux" / "icon.png",
-}
-
-ASSET_VARIANTS = {
-    "Windows": ROOT / "assets_win",
-    "Darwin": ROOT / "assets_mac",
-    "Linux": ROOT / "assets_linux",
-}
-
-def run(cmd: list[str]):
-    print(">>", " ".join(str(c) for c in cmd))
+def run(cmd):
+    print(">>", " ".join(map(str, cmd)), flush=True)
     subprocess.check_call(cmd)
 
 def main():
-    p = argparse.ArgumentParser(description="Cross-platform PyInstaller build")
-    p.add_argument("--name", default="MATCH", help="App name")
-    p.add_argument("--version", default=None, help="User-visible version (only printed)")
-    p.add_argument("--windowed", action="store_true", default=True, help="Windowed app")
-    p.add_argument("--clean", action="store_true", help="Clean dist/build before build")
-    p.add_argument("--pyinstaller", default="pyinstaller", help="PyInstaller executable")
-    args = p.parse_args()
+    # … твоя логика подготовки assets_stage …
 
-    system = platform.system()  # 'Windows' | 'Darwin' | 'Linux'
-    if system not in ("Windows", "Darwin", "Linux"):
-        print(f"Unsupported system: {system}", file=sys.stderr)
-        sys.exit(2)
+    # чистим/создаём каталоги вывода
+    shutil.rmtree(DIST,  ignore_errors=True)
+    shutil.rmtree(BUILD, ignore_errors=True)
+    DIST.mkdir(parents=True, exist_ok=True)
+    BUILD.mkdir(parents=True, exist_ok=True)
 
-    # Подготовка
-    if args.clean:
-        shutil.rmtree(DIST, ignore_errors=True)
-        shutil.rmtree(BUILD, ignore_errors=True)
-    shutil.rmtree(ASSETS_STAGE, ignore_errors=True)
-
-    # Cпуллим общие ассеты в stage → позже подмонтируем как 'assets'
-    if ASSETS_COMMON.is_dir():
-        shutil.copytree(ASSETS_COMMON, ASSETS_STAGE)
-    else:
-        print("WARNING: assets_common/ not found; continuing without assets", file=sys.stderr)
-        ASSETS_STAGE.mkdir(parents=True, exist_ok=True)
-
-    variant_dir = ASSET_VARIANTS.get(system)
-    if variant_dir and variant_dir.is_dir():
-        shutil.copytree(variant_dir, ASSETS_STAGE, dirs_exist_ok=True)
-
-    add_data_sep = ";" if system == "Windows" else ":"
-    add_data_arg = f"{ASSETS_STAGE}{add_data_sep}assets"
-
-    icon = ICONS.get(system)
-    if not icon or not icon.exists():
-        print(f"WARNING: icon for {system} not found, proceeding without --icon", file=sys.stderr)
-        icon = None
-
-    # Базовая команда PyInstaller
     cmd = [
-    sys.executable, "-m", "PyInstaller",   # ← вместо просто "pyinstaller"
-    str(SRC_ENTRY),
-    "--onedir",
-    "--name", args.name,
-    "--add-data", add_data_arg,            # на Windows: "C:\...\assets_stage;assets"
-    "--windowed",
+        sys.executable, "-m", "PyInstaller",
+        str(ROOT / "MATCH.py"),
+        "--onedir",
+        "--name", "MATCH",
+        "--windowed",
+        "--add-data", f"{(ROOT/'assets_stage')};assets" if sys.platform.startswith("win") else f"{(ROOT/'assets_stage')}:assets",
+        "--distpath", str(DIST),          # <<< ЯВНО
+        "--workpath", str(BUILD),         # <<< ЯВНО
+        "--specpath", str(BUILD),         # <<< ЯВНО
     ]
-    if icon:
-        cmd += ["--icon", str(icon)]
+    # (при необходимости) добавить --icon …
 
-
-    # Запуск
     run(cmd)
 
-    # Доп. шаги для *nix: права на бинарники
-    app_dir = DIST / args.name
-    if system in ("Darwin", "Linux"):
-        # основной бинарь
-        bin_path = app_dir / args.name
-        if bin_path.exists():
-            bin_path.chmod(0o755)
-        # macOS .app
-        mac_bin = app_dir / f"{args.name}.app" / "Contents" / "MacOS" / args.name
-        if mac_bin.exists():
-            mac_bin.chmod(0o755)
-
-    print("\n=== Build complete ===")
-    print(f"System:       {system}")
-    print(f"Output dir:   {app_dir}")
-    if args.version:
-        print(f"User version: {args.version}")
-    print("Stage assets: assets_common -> dist/.../assets")
-    print("======================\n")
+    out = DIST / "MATCH"
+    print(f"[build] output dir: {out}  exists={out.exists()}", flush=True)
+    if not out.exists():
+        # жёстко завершаем, чтобы upload-артефакт не шёл впустую
+        raise SystemExit("PyInstaller did not produce dist/MATCH. See log above.")
 
 if __name__ == "__main__":
     main()
+
