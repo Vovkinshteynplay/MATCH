@@ -1,9 +1,13 @@
 name: Build (Win/Linux/macOS)
 
 on:
-  workflow_dispatch:
-  push:
-    tags: ["v*"]
+  push:                     # автозапуск при пуше
+    branches: ["main"]      # или ["**"] — на все ветки
+    # paths: ["src/**", "assets_common/**"]  # (опц.) только при изменениях в указанных путях
+    # paths-ignore: ["README.md", ".github/**"]  # (опц.) игнорировать шум
+  pull_request:             # (опц.) собирать в PR
+    branches: ["main"]
+  workflow_dispatch:        # (опц.) запуск вручную из Actions
 
 jobs:
   build:
