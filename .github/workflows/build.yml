@@ -1,19 +1,132 @@
-- name: Build via build_match.py
-  shell: bash
-  run: |
-    python build_match.py --name MATCH --version "${GITHUB_REF_NAME:-$GITHUB_SHA}" --clean
+name: Build (Win/Linux/macOS) ➜ commit to builds branch
 
-- name: Sanity print
-  shell: bash
-  run: |
-    echo "Built on $RUNNER_OS"
-    [ -d dist ] && ls -la dist || echo "no dist"
-    [ -d "dist/MATCH" ] && ls -la "dist/MATCH" || echo "no dist/MATCH"
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths-ignore:
+      - "builds/**"   # коммиты бинарей не триггерят этот workflow
 
-- name: Ensure dist/MATCH exists
-  shell: bash
-  run: |
-    if [ ! -d "dist/MATCH" ]; then
-      echo "::error ::dist/MATCH not found. See build logs above."
-      exit 1
-    fi
+permissions:
+  contents: write      # нужно, чтобы пушить в репозиторий
+
+jobs:
+  build:
+    name: Build ${{ matrix.channel }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            channel: win
+          - os: ubuntu-latest
+            channel: linux
+          - os: macos-14
+            channel: mac
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install pygame pyinstaller
+          # Если на Windows используешь PNG как --icon (PyInstaller конвертирует через Pillow), раскомментируй:
+          # if [ "$RUNNER_OS" = "Windows" ]; then pip install pillow; fi
+
+      - name: Build via build_match.py
+        shell: bash
+        run: |
+          # запускаем твой скрипт из корня репозитория
+          python build_match.py --name MATCH --version "${GITHUB_REF_NAME:-$GITHUB_SHA}" --clean
+
+      - name: Sanity print
+        shell: bash
+        run: |
+          echo "Built on $RUNNER_OS"
+          [ -d dist ] && ls -la dist || echo "no dist"
+          [ -d "dist/MATCH" ] && ls -la "dist/MATCH" || echo "no dist/MATCH"
+
+      - name: Ensure dist/MATCH exists
+        shell: bash
+        run: |
+          if [ ! -d "dist/MATCH" ]; then
+            echo "::error ::dist/MATCH not found. See build logs above."
+            exit 1
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MATCH-${{ matrix.channel }}
+          path: dist/MATCH
+          if-no-files-found: error
+
+  publish-to-builds-branch:
+    name: Commit builds/ to `builds` branch
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (git state)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: _artifacts
+
+      - name: Prepare working tree on `builds` branch
+        shell: bash
+        run: |
+          set -e
+
+          # переключаемся на ветку builds (или создаём её как orphan)
+          if git ls-remote --exit-code --heads origin builds >/dev/null 2>&1; then
+            git checkout builds
+          else
+            git checkout --orphan builds
+            git rm -rf . 2>/dev/null || true
+          fi
+
+          # чистим целевые каталоги и раскладываем свежие сборки
+          rm -rf builds
+          mkdir -p builds/win builds/linux builds/mac
+
+          # артефакты: MATCH-win, MATCH-linux, MATCH-mac
+          [ -d "_artifacts/MATCH-win" ]   && cp -a _artifacts/MATCH-win/.   builds/win/
+          [ -d "_artifacts/MATCH-linux" ] && cp -a _artifacts/MATCH-linux/. builds/linux/
+          [ -d "_artifacts/MATCH-mac" ]   && cp -a _artifacts/MATCH-mac/.   builds/mac/
+
+          echo "Tree on builds branch (top):"
+          ls -la
+          echo "builds/win:"   && ls -la builds/win   || true
+          echo "builds/linux:" && ls -la builds/linux || true
+          echo "builds/mac:"   && ls -la builds/mac   || true
+
+      - name: Commit & push to `builds`
+        env:
+          GIT_AUTHOR_NAME: github-actions
+          GIT_AUTHOR_EMAIL: github-actions@github.com
+          GIT_COMMITTER_NAME: github-actions
+          GIT_COMMITTER_EMAIL: github-actions@github.com
+        shell: bash
+        run: |
+          set -e
+          git add builds
+          if git diff --cached --quiet; then
+            echo "No changes to commit in builds/, skipping."
+            exit 0
+          fi
+          git commit -m "ci: update builds/ ($(date -u +'%Y-%m-%dT%H:%M:%SZ')) [skip ci]"
+          git push origin builds
