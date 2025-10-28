@@ -32,7 +32,7 @@ jobs:
 
       - name: Build
         run: |
-          python tools/build.py --name MATCH --version "${{ github.ref_name }}" --clean
+          python build_MATCH.py --name MATCH --version "${{ github.ref_name }}" --clean
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
