@@ -92,7 +92,7 @@ def main():
     print(f"Output dir:   {app_dir}")
     if args.version:
         print(f"User version: {args.version}")
-    print("Stage assets: assets_common → dist/.../assets")
+    print("Stage assets: assets_common -> dist/.../assets")
     print("======================\n")
 
 if __name__ == "__main__":
