@@ -1,5 +1,6 @@
 import json
 import os
+import io
 import sys
 import ctypes
 import random
@@ -14,8 +15,64 @@ BASE_PATH = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
 APP_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 SAVE_ROOT = os.path.join(APP_DIR, "saves")
 
+_ASSET_ROOTS = None
+
+
+def _detect_platform_assets_dir() -> str | None:
+    plat = sys.platform.lower()
+    if plat.startswith("win"):
+        return "assets_win"
+    if plat == "darwin":
+        return "assets_mac"
+    if plat.startswith("linux"):
+        return "assets_linux"
+    return None
+
+
+def _asset_roots() -> list[str]:
+    global _ASSET_ROOTS
+    if _ASSET_ROOTS is not None:
+        return _ASSET_ROOTS
+
+    roots: list[str] = []
+    # Assets bundled by PyInstaller (assets/ inside _MEIPASS)
+    bundle_assets = os.path.join(BASE_PATH, "assets")
+    if os.path.isdir(bundle_assets):
+        roots.append(bundle_assets)
+
+    # Development-time asset folders
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (
+        os.path.join(project_root, "assets"),  # legacy
+        os.path.join(project_root, "assets_common"),
+    ):
+        if os.path.isdir(candidate) and candidate not in roots:
+            roots.append(candidate)
+
+    variant_dir_name = _detect_platform_assets_dir()
+    if variant_dir_name:
+        variant_path = os.path.join(project_root, variant_dir_name)
+        if os.path.isdir(variant_path) and variant_path not in roots:
+            roots.append(variant_path)
+
+    _ASSET_ROOTS = roots
+    return _ASSET_ROOTS
+
 
 def _res(*parts):
+    if not parts:
+        raise ValueError("_res requires at least one path component")
+    # Allow lookups like _res("assets", "file")
+    if parts[0] == "assets":
+        rel = os.path.join(*parts[1:]) if len(parts) > 1 else ""
+        for root in _asset_roots():
+            candidate = os.path.join(root, rel)
+            if os.path.exists(candidate):
+                return candidate
+        # Fallback to first asset root even if the file is missing; keeps behaviour predictable
+        roots = _asset_roots()
+        if roots:
+            return os.path.join(roots[0], rel)
     return os.path.join(BASE_PATH, *parts)
 
 # ---------------------------- PARAMETERS ----------------------------
@@ -610,17 +667,33 @@ def simulate_full_chain(board, a, b):
 def _load_window_icon():
     # Собираем набор вариантов путей: обычные и внутри PyInstaller-папки _internal
     candidates = [
+        _res('assets', 'icon.png'),
         _res('assets', 'icon.ico'),
+        _res('_internal', 'assets', 'icon.png'),
         _res('_internal', 'assets', 'icon.ico'),
+        os.path.join(os.path.dirname(__file__), 'assets', 'icon.png'),
         os.path.join(os.path.dirname(__file__), 'assets', 'icon.ico'),
+        os.path.join(os.path.dirname(__file__), 'icon.png'),
         os.path.join(os.path.dirname(__file__), 'icon.ico'),
+        'assets/icon.png',
         'assets/icon.ico',
+        'icon.png',
         'icon.ico',
     ]
     for p in candidates:
         try:
             if os.path.exists(p):
-                return pygame.image.load(p)
+                try:
+                    return pygame.image.load(p)
+                except Exception:
+                    try:
+                        with open(p, "rb") as fh:
+                            data = fh.read()
+                        sig = data.find(b"\x89PNG\r\n\x1a\n")
+                        if sig != -1:
+                            return pygame.image.load(io.BytesIO(data[sig:]))
+                    except Exception:
+                        pass
         except Exception:
             pass
     return None

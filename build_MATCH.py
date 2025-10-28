@@ -21,6 +21,12 @@ ICONS = {
     "Linux":   ROOT / "assets_linux" / "icon.png",
 }
 
+ASSET_VARIANTS = {
+    "Windows": ROOT / "assets_win",
+    "Darwin": ROOT / "assets_mac",
+    "Linux": ROOT / "assets_linux",
+}
+
 def run(cmd: list[str]):
     print(">>", " ".join(str(c) for c in cmd))
     subprocess.check_call(cmd)
@@ -50,6 +56,11 @@ def main():
         shutil.copytree(ASSETS_COMMON, ASSETS_STAGE)
     else:
         print("WARNING: assets_common/ not found; continuing without assets", file=sys.stderr)
+        ASSETS_STAGE.mkdir(parents=True, exist_ok=True)
+
+    variant_dir = ASSET_VARIANTS.get(system)
+    if variant_dir and variant_dir.is_dir():
+        shutil.copytree(variant_dir, ASSETS_STAGE, dirs_exist_ok=True)
 
     add_data_sep = ";" if system == "Windows" else ":"
     add_data_arg = f"{ASSETS_STAGE}{add_data_sep}assets"
