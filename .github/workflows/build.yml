@@ -100,8 +100,8 @@ jobs:
           fi
 
           # чистим целевые каталоги и раскладываем свежие сборки
-          rm -rf builds
-          mkdir -p builds/win builds/linux builds/mac
+          rm -rf
+          mkdir -p win linux mac
 
           # артефакты: MATCH-win, MATCH-linux, MATCH-mac
           [ -d "_artifacts/MATCH-win" ]   && cp -a _artifacts/MATCH-win/.   builds/win/
