@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           # запускаем твой скрипт из корня репозитория
-          python build_match.py --name MATCH --version "${GITHUB_REF_NAME:-$GITHUB_SHA}" --clean
+          python build_MATCH.py --name MATCH --version "${GITHUB_REF_NAME:-$GITHUB_SHA}" --clean
 
       - name: Sanity print
         shell: bash
