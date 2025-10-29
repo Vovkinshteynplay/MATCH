@@ -50,56 +50,56 @@ def main():
     # для диагностики выведем, что реально в STAGE
     print("[diagnostics] STAGE exists:", STAGE.exists(), "count:", sum(1 for _ in STAGE.rglob('*')))
     run(cmd)
-    
-        # === Add readme.txt ===
-    readme_text = """\
-    ==============================
-    MATCH — Minimalist Puzzle Game
-    ==============================
 
-    ▶️  HOW TO RUN (Linux)
-    ------------------------------
-    1. Extract the archive anywhere you like.
-    2. Make the game executable (if needed):
-    chmod +x MATCH
-    3. Run the game:
-    ./MATCH
+# === Linux-only readme ===
+if platform.system() == "Linux":
+    version = getattr(args, "version", "dev")
+    readme_text = f"""\
+==============================
+ MATCH — Minimalist Puzzle Game
+==============================
 
-    💡  OPTIONAL — Add to Applications Menu
-    ---------------------------------------
-    To add MATCH to your Linux applications menu or WSL Start Menu:
-    mkdir -p ~/.local/share/applications
-    cp match.desktop ~/.local/share/applications/
-    chmod +x ~/.local/share/applications/match.desktop
-    Then restart your session or WSL.
+▶️  HOW TO RUN (Linux)
+------------------------------
+1. Extract the archive anywhere you like.
+2. Make the game executable (if needed):
+   chmod +x MATCH
+3. Run the game:
+   ./MATCH
 
-    🎧  SOUND
-    ---------------------------------------
-    On native Linux distributions sound works automatically.
-    If you are using WSL2 with WSLg and have no sound, add this to ~/.bashrc:
-    export PULSE_SERVER=unix:/mnt/wslg/PulseServer
-    export SDL_AUDIODRIVER=pulse
-    Then restart WSL.
+💡  OPTIONAL — Add to Applications Menu
+---------------------------------------
+To add MATCH to your Linux applications menu or WSL Start Menu:
+   mkdir -p ~/.local/share/applications
+   cp match.desktop ~/.local/share/applications/
+   chmod +x ~/.local/share/applications/match.desktop
+Then restart your session or WSL.
 
-    🐧  ITCH.IO LAUNCHER
-    ---------------------------------------
-    When using the itch.io app, just click “Launch” — it will automatically
-    set permissions and run the correct binary.
-    No manual configuration is required.
+🎧  SOUND
+---------------------------------------
+On native Linux distributions sound works automatically.
+If you are using WSL2 with WSLg and have no sound, add this to ~/.bashrc:
+   export PULSE_SERVER=unix:/mnt/wslg/PulseServer
+   export SDL_AUDIODRIVER=pulse
+Then restart WSL.
 
-    🕹  ABOUT
-    ---------------------------------------
-    MATCH is a minimalist competitive puzzle game.
-    Version: {version}
-    Developer: Vovkinshteyn
-    """.format(version="0.7.2")
+🐧  ITCH.IO LAUNCHER
+---------------------------------------
+When using the itch.io app, just click “Launch” — it will automatically
+set permissions and run the correct binary.
+No manual configuration is required.
 
+🕹  ABOUT
+---------------------------------------
+MATCH is a minimalist competitive puzzle game.
+Version: {version}
+Developer: Vovkinshteynplay
+"""
     readme_path = DIST / "MATCH" / "readme.txt"
-    with open(readme_path, "w", encoding="utf-8") as f:
-        f.write(readme_text)
-    print(f"[build] readme.txt written to {readme_path}")
+    readme_path.write_text(readme_text, encoding="utf-8")
+    print(f"[build] (Linux) wrote {readme_path}")
 
-
+    
     out = DIST / "MATCH"
     print(f"[build] output dir: {out}  exists={out.exists()}", flush=True)
     if not out.exists():
