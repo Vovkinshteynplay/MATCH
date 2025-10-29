@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=MATCH
+Comment=Minimalist Competitive Puzzle
+# Portable запуск из любой папки: %k — путь к этому .desktop
+Exec=sh -c 'cd "$(dirname "$1")" && exec ./MATCH' dummy %k
+Icon=assets/icon.png
+Terminal=false
+Categories=Game;Puzzle;
+StartupNotify=false
