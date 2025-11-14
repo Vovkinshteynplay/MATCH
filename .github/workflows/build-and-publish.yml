@@ -17,52 +17,157 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: windows-latest
-            platform: win
-          - os: macos-latest
-            platform: mac
-          - os: ubuntu-latest
-            platform: linux
+          - platform: win
+            os: windows-latest
+          - platform: mac
+            os: macos-latest
+          - platform: linux
+            os: ubuntu-latest
+    env:
+      SRC_FILES: >
+        engine/app/StandaloneMain.cpp
+        engine/app/src/AssetFS.cpp
+        engine/core/src/Board.cpp
+        engine/core/src/AI.cpp
+        engine/core/src/GameConfig.cpp
+        engine/core/src/SavePayload.cpp
+        engine/platform/src/AudioSystem.cpp
+        engine/platform/src/SdlInput.cpp
+        engine/platform/src/SdlSaveService.cpp
+        engine/ui/src/Screens.cpp
+        engine/render/src/SceneRenderer.cpp
+      INCLUDE_FLAGS: >
+        -Iengine/app/include
+        -Iengine/platform/include
+        -Iengine/ui/include
+        -Iengine/render/include
+        -Iengine/core/include
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup MSYS2 (Windows)
+        if: matrix.platform == 'win'
+        uses: msys2/setup-msys2@v2
         with:
-          python-version: "3.11"
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkg-config
+            mingw-w64-ucrt-x86_64-SDL2
+            mingw-w64-ucrt-x86_64-SDL2_ttf
+            mingw-w64-ucrt-x86_64-SDL2_mixer
+            mingw-w64-ucrt-x86_64-SDL2_image
 
-      - name: Install build dependencies
+      - name: Install dependencies (Ubuntu)
+        if: matrix.platform == 'linux'
         run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller pygame
+          sudo apt-get update
+          sudo apt-get install -y g++ pkg-config \
+            libsdl2-dev libsdl2-ttf-dev libsdl2-mixer-dev libsdl2-image-dev
 
-      - name: Build MATCH
-        run: python build_MATCH.py --name MATCH --clean
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'mac'
+        run: |
+          brew update
+          brew install sdl2 sdl2_ttf sdl2_mixer sdl2_image pkg-config
 
-      - name: Stage artifact
-        shell: python
+      - name: Build Windows binary
+        if: matrix.platform == 'win'
+        shell: msys2 {0}
+        run: |
+          mkdir -p build/win
+          SRC="${SRC_FILES}"
+          INC="${INCLUDE_FLAGS}"
+          PKG_FLAGS="$(pkg-config --cflags --libs sdl2 SDL2_ttf SDL2_mixer SDL2_image)"
+          g++ -std=c++17 -O2 $INC $SRC -lmingw32 -lSDL2main $PKG_FLAGS -static-libstdc++ -static-libgcc -o build/win/MATCH.exe
+
+      - name: Build Linux binary
+        if: matrix.platform == 'linux'
+        run: |
+          mkdir -p build/linux
+          SRC="${SRC_FILES}"
+          INC="${INCLUDE_FLAGS}"
+          PKG_FLAGS="$(pkg-config --cflags --libs sdl2 SDL2_ttf SDL2_mixer SDL2_image)"
+          g++ -std=c++17 -O2 $INC $SRC $PKG_FLAGS -o build/linux/MATCH
+
+      - name: Build macOS binary
+        if: matrix.platform == 'mac'
         env:
-          PLATFORM_NAME: ${{ matrix.platform }}
+          PKG_CONFIG_PATH: /opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig
         run: |
-          import os
-          import shutil
-          from pathlib import Path
+          mkdir -p build/mac
+          SRC="${SRC_FILES}"
+          INC="${INCLUDE_FLAGS}"
+          PKG_FLAGS="$(pkg-config --cflags --libs sdl2 SDL2_ttf SDL2_mixer SDL2_image)"
+          clang++ -std=c++17 -O2 $INC $SRC $PKG_FLAGS -framework Cocoa -o build/mac/MATCH
 
-          platform = os.environ["PLATFORM_NAME"]
-          src = Path("dist") / "MATCH"
-          dest = Path("build_artifacts") / platform
-          if not src.exists():
-              raise SystemExit(f"Expected build output at {src}")
-          if dest.exists():
-              shutil.rmtree(dest)
-          shutil.copytree(src, dest)
+      - name: Stage Windows artifact
+        if: matrix.platform == 'win'
+        shell: msys2 {0}
+        run: |
+          DEST=artifacts/win
+          rm -rf "$DEST"
+          mkdir -p "$DEST/assets"
+          cp build/win/MATCH.exe "$DEST/MATCH.exe"
+          cp -a assets_common/. "$DEST/assets/"
+          if [ -d assets_win ]; then cp -a assets_win/. "$DEST/assets/"; fi
+          if [ -f assets_win/icon.ico ]; then cp assets_win/icon.ico "$DEST/icon.ico"; fi
+
+      - name: Stage Linux artifact
+        if: matrix.platform == 'linux'
+        run: |
+          DEST=artifacts/linux
+          rm -rf "$DEST"
+          mkdir -p "$DEST/assets"
+          cp build/linux/MATCH "$DEST/MATCH"
+          chmod +x "$DEST/MATCH"
+          cp -a assets_common/. "$DEST/assets/"
+          if [ -d assets_linux ]; then cp -a assets_linux/. "$DEST/assets/"; fi
+          if [ -f assets_linux/icon.png ]; then cp assets_linux/icon.png "$DEST/icon.png"; fi
+
+      - name: Stage macOS artifact
+        if: matrix.platform == 'mac'
+        run: |
+          DEST=artifacts/mac
+          APP="$DEST/MATCH.app"
+          MACOS="$APP/Contents/MacOS"
+          RES="$APP/Contents/Resources"
+          rm -rf "$DEST"
+          mkdir -p "$MACOS" "$RES"
+          cp build/mac/MATCH "$MACOS/MATCH"
+          chmod +x "$MACOS/MATCH"
+          mkdir -p "$MACOS/assets"
+          cp -a assets_common/. "$MACOS/assets/"
+          if [ -d assets_mac ]; then cp -a assets_mac/. "$MACOS/assets/"; fi
+          if [ -f assets_mac/icon.icns ]; then cp assets_mac/icon.icns "$RES/icon.icns"; fi
+          cat <<'EOF' > "$APP/Contents/Info.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>MATCH</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.vovkinshteyn.match</string>
+    <key>CFBundleName</key>
+    <string>MATCH</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
+</dict>
+</plist>
+EOF
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}-build
-          path: build_artifacts/${{ matrix.platform }}
+          path: artifacts/${{ matrix.platform }}
 
   publish:
     name: Publish artifacts
