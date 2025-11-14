@@ -185,17 +185,18 @@ jobs:
 
       - name: Sync artifacts into builds branch
         run: |
-          mkdir -p builds/win builds/mac builds/linux
-          rm -rf builds/win/* builds/mac/* builds/linux/*
-          cp -a artifacts/win/. builds/win/
-          cp -a artifacts/mac/. builds/mac/
-          cp -a artifacts/linux/. builds/linux/
+          rm -rf win/*
+          rm -rf mac/*
+          rm -rf linux/*
+          cp -a artifacts/win/. win/
+          cp -a artifacts/mac/. mac/
+          cp -a artifacts/linux/. linux/
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add builds/win builds/mac builds/linux
+          git add win mac linux
           if git diff --cached --quiet; then
             echo "No updates to publish."
             exit 0
