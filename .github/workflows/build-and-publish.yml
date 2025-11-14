@@ -1,0 +1,118 @@
+name: Build and Publish MATCH
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pygame
+
+      - name: Build MATCH
+        run: python build_MATCH.py --name MATCH --clean
+
+      - name: Stage artifact
+        shell: python
+        env:
+          PLATFORM_NAME: ${{ matrix.platform }}
+        run: |
+          import os
+          import shutil
+          from pathlib import Path
+
+          platform = os.environ["PLATFORM_NAME"]
+          src = Path("dist") / "MATCH"
+          dest = Path("build_artifacts") / platform
+          if not src.exists():
+              raise SystemExit(f"Expected build output at {src}")
+          if dest.exists():
+              shutil.rmtree(dest)
+          shutil.copytree(src, dest)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-build
+          path: build_artifacts/${{ matrix.platform }}
+
+  publish:
+    name: Publish artifacts
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Switch to builds branch
+        run: |
+          git fetch origin builds || true
+          git checkout builds || git checkout -b builds
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: win-build
+          path: artifacts/win
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-build
+          path: artifacts/mac
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: artifacts/linux
+
+      - name: Sync artifacts into builds branch
+        run: |
+          mkdir -p builds/win builds/mac builds/linux
+          rm -rf builds/win/* builds/mac/* builds/linux/*
+          cp -a artifacts/win/. builds/win/
+          cp -a artifacts/mac/. builds/mac/
+          cp -a artifacts/linux/. builds/linux/
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add builds/win builds/mac builds/linux
+          if git diff --cached --quiet; then
+            echo "No updates to publish."
+            exit 0
+          fi
+          git commit -m "Update MATCH builds (${GITHUB_RUN_ID})"
+          git push origin HEAD:builds

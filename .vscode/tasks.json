@@ -1,0 +1,53 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "cppbuild",
+            "label": "Build StandaloneMain (g++)",
+            "command": "C:\\TOOLS\\MSYS\\ucrt64\\bin\\g++.exe",
+            "args": [
+                "-std=c++17",
+                "-g",
+                "-Iengine/app/include",
+                "-Iengine/platform/include",
+                "-Iengine/ui/include",
+                "-Iengine/render/include",
+                "-Iengine/core/include",
+                "-IC:/TOOLS/MSYS/ucrt64/include",
+                "${workspaceFolder}/engine/app/StandaloneMain.cpp",
+                "${workspaceFolder}/engine/app/src/AssetFS.cpp",
+                "${workspaceFolder}/engine/core/src/Board.cpp",
+                "${workspaceFolder}/engine/core/src/AI.cpp",
+                "${workspaceFolder}/engine/core/src/GameConfig.cpp",
+                "${workspaceFolder}/engine/core/src/SavePayload.cpp",
+                "${workspaceFolder}/engine/platform/src/AudioSystem.cpp",
+                "${workspaceFolder}/engine/platform/src/SdlInput.cpp",
+                "${workspaceFolder}/engine/platform/src/SdlSaveService.cpp",
+                "${workspaceFolder}/engine/ui/src/Screens.cpp",
+                "${workspaceFolder}/engine/render/src/SceneRenderer.cpp",
+                "-L",
+                "C:/TOOLS/MSYS/ucrt64/lib",
+                "-lmingw32",
+                "-lSDL2main",
+                "-lSDL2",
+                "-lSDL2_ttf",
+                "-lSDL2_mixer",
+                "-lSDL2_image",
+                "-mwindows",
+                "-o",
+                "${workspaceFolder}/engine/app/StandaloneMain.exe"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "detail": "Build MATCH SDL standalone binary using g++ from MSYS2 UCRT64."
+        }
+    ]
+}
