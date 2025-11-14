@@ -142,7 +142,7 @@ jobs:
           cp -a assets_common/. "$MACOS/assets/"
           if [ -d assets_mac ]; then cp -a assets_mac/. "$MACOS/assets/"; fi
           if [ -f assets_mac/icon.icns ]; then cp assets_mac/icon.icns "$RES/icon.icns"; fi
-          cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
+          if [ -f assets_mac/Info.plist ]; then cp assets_mac/Info.plist "$APP/Contents/Info.plist"; fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
