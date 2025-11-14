@@ -113,6 +113,7 @@ jobs:
           cp build/win/MATCH.exe "$DEST/MATCH.exe"
           cp -a assets_common/. "$DEST/assets/"
           if [ -d assets_win ]; then cp -a assets_win/. "$DEST/assets/"; fi
+          rm -f "$DEST/assets/icon.ico"
           if [ -f assets_win/icon.ico ]; then cp assets_win/icon.ico "$DEST/icon.ico"; fi
 
       - name: Stage Linux artifact
@@ -125,6 +126,7 @@ jobs:
           chmod +x "$DEST/MATCH"
           cp -a assets_common/. "$DEST/assets/"
           if [ -d assets_linux ]; then cp -a assets_linux/. "$DEST/assets/"; fi
+          rm -f "$DEST/assets/icon.png"
           if [ -f assets_linux/icon.png ]; then cp assets_linux/icon.png "$DEST/icon.png"; fi
 
       - name: Stage macOS artifact
@@ -141,6 +143,7 @@ jobs:
           mkdir -p "$MACOS/assets"
           cp -a assets_common/. "$MACOS/assets/"
           if [ -d assets_mac ]; then cp -a assets_mac/. "$MACOS/assets/"; fi
+          rm -f "$MACOS/assets/icon.icns" "$MACOS/assets/Info.plist"
           if [ -f assets_mac/icon.icns ]; then cp assets_mac/icon.icns "$RES/icon.icns"; fi
           if [ -f assets_mac/Info.plist ]; then cp assets_mac/Info.plist "$APP/Contents/Info.plist"; fi
 
