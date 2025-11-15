@@ -78,10 +78,11 @@ jobs:
         shell: msys2 {0}
         run: |
           mkdir -p build/win
+          windres engine/app/win/MatchResources.rc build/win/MatchResources.res
           SRC="${SRC_FILES}"
           INC="${INCLUDE_FLAGS}"
           PKG_FLAGS="$(pkg-config --cflags --libs sdl2 SDL2_ttf SDL2_mixer SDL2_image)"
-          g++ -std=c++17 -O2 $INC $SRC -lmingw32 -lSDL2main $PKG_FLAGS -static-libstdc++ -static-libgcc -o build/win/MATCH.exe
+          g++ -std=c++17 -O2 $INC $SRC build/win/MatchResources.res -lmingw32 -lSDL2main $PKG_FLAGS -static-libstdc++ -static-libgcc -o build/win/MATCH.exe
 
       - name: Build Linux binary
         if: matrix.platform == 'linux'
