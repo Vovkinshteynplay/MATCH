@@ -24,7 +24,7 @@ struct UiMetrics {
 constexpr float kReferenceWidth = 1920.0f;
 constexpr float kReferenceHeight = 1080.0f;
 
-const SDL_Color kBackground{26, 27, 32, 255};
+const SDL_Color kBackground{24, 26, 31, 255};
 const SDL_Color kPanelFill{40, 42, 50, 240};
 const SDL_Color kPanelBorder{84, 86, 96, 255};
 const SDL_Color kButtonFill{48, 50, 60, 255};

@@ -1327,10 +1327,7 @@ std::filesystem::path DetermineStandaloneSaveRoot() {
     if (base_dir.empty()) {
         base_dir = std::filesystem::current_path();
     }
-    std::filesystem::path saves_dir = base_dir / "saves";
-    std::error_code ec;
-    std::filesystem::create_directories(saves_dir, ec);
-    return saves_dir;
+    return base_dir / "saves";
 }
 
 std::string FormatTimestamp(std::time_t value) {
@@ -1356,42 +1353,159 @@ constexpr float kIntroMinimumDurationMs = 2000.0f;
 
 struct IntroState {
     bool active = true;
-    SDL_Texture* logo_texture = nullptr;
-    int logo_w = 0;
-    int logo_h = 0;
     float elapsed_ms = 0.0f;
     float min_duration_ms = 0.0f;
+    int cols = 3;
+    int rows = 3;
+    int cycles_completed = 0;
+    int max_cycles = 3;
+
+    match::core::Board board;
+    match::core::Move current_move;
+    match::core::SimulationResult sim_result;
+    std::size_t chain_index = 0;
+
+    enum class Phase { Idle, Swap, Clear, Fall, Pause } phase = Phase::Idle;
+    float phase_time_ms = 0.0f;
+
+    float swap_duration_ms = static_cast<float>(match::render::kSwapDurationMs);
+    float clear_duration_ms = static_cast<float>(match::render::kPopDurationMs);
+    float fall_duration_ms = static_cast<float>(match::render::kFallDurationMinMs * 3);
+    float pause_duration_ms = 450.0f;
 };
 
+bool FindIntroMove(const match::core::Board& board, match::core::Move& out_move,
+                   match::core::SimulationResult& out_result);
+
 void DestroyIntroResources(IntroState& state) {
-    if (state.logo_texture) {
-        SDL_DestroyTexture(state.logo_texture);
-        state.logo_texture = nullptr;
+}
+
+match::core::Board MakeIntroBoard(int cols, int rows) {
+    match::core::Board::Rules rules;
+    rules.cols = cols;
+    rules.rows = rows;
+    rules.tile_types = 6;
+    rules.bombs_enabled = false;
+    rules.color_chain_enabled = false;
+
+    match::core::Board board;
+    int attempts = 0;
+    match::core::Move dummy_move;
+    match::core::SimulationResult dummy_result;
+    do {
+        board = match::core::NewBoard(rules, static_cast<std::uint32_t>(SDL_GetTicks() + attempts * 997u));
+        ++attempts;
+    } while (!(match::core::AnyLegalMoves(board) &&
+               FindIntroMove(board, dummy_move, dummy_result)) &&
+             attempts < 16);
+    return board;
+}
+
+bool FindIntroMove(const match::core::Board& board, match::core::Move& out_move,
+                   match::core::SimulationResult& out_result) {
+    for (int col = 0; col < board.cols(); ++col) {
+        for (int row = 0; row < board.rows(); ++row) {
+            match::core::Cell here{col, row};
+            constexpr std::array<match::core::Cell, 4> kDirs{
+                match::core::Cell{1, 0}, match::core::Cell{-1, 0}, match::core::Cell{0, 1},
+                match::core::Cell{0, -1}};
+            for (const auto& dir : kDirs) {
+                match::core::Cell there{col + dir.col, row + dir.row};
+                if (!board.inBounds(there)) {
+                    continue;
+                }
+                match::core::Board test = board;
+                match::core::Move move{here, there};
+                if (!match::core::LegalSwap(test, move)) {
+                    continue;
+                }
+                out_move = move;
+                out_result = match::core::SimulateFullChain(test, move);
+                if (!out_result.chain_events.empty()) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void SetPresetIntroBoard(IntroState& state, match::core::Move& out_move,
+                         match::core::SimulationResult& out_result) {
+    match::core::Board::Rules rules;
+    rules.cols = state.cols;
+    rules.rows = state.rows;
+    rules.tile_types = 6;
+    rules.bombs_enabled = false;
+    rules.color_chain_enabled = false;
+    state.board = match::core::Board(rules, 1);
+    state.board.fillAll(0);
+    state.board.set(0, 0, 1);
+    state.board.set(0, 1, 5);
+    state.board.set(0, 2, 2);
+    state.board.set(1, 0, 3);
+    state.board.set(1, 1, 0);
+    state.board.set(1, 2, 0);
+    state.board.set(2, 0, 4);
+    state.board.set(2, 1, 0);
+    state.board.set(2, 2, 5);
+
+    out_move = match::core::Move{match::core::Cell{1, 0}, match::core::Cell{1, 1}};
+    match::core::Board temp = state.board;
+    out_result = match::core::SimulateFullChain(temp, out_move);
+}
+
+SDL_FPoint IntroCellCenter(int window_w, int window_h, int cols, int rows, float cell_size,
+                           const match::core::Cell& cell) {
+    const float board_w = cell_size * static_cast<float>(cols);
+    const float board_h = cell_size * static_cast<float>(rows);
+    float left = (static_cast<float>(window_w) - board_w) * 0.5f;
+    float top = (static_cast<float>(window_h) - board_h) * 0.5f;
+    SDL_FPoint p;
+    p.x = left + (cell.col + 0.5f) * cell_size;
+    p.y = top + (cell.row + 0.5f) * cell_size;
+    return p;
+}
+
+void BeginIntroClear(IntroState& state) {
+    state.phase = IntroState::Phase::Clear;
+    state.phase_time_ms = 0.0f;
+    if (g_audio) {
+        g_audio->PlayMatch(false);
     }
 }
 
-void TryLoadIntroLogo(SDL_Renderer* renderer, IntroState& state) {
-    std::filesystem::path logo_path = AssetPath("logo.png");
-    if (!FileExists(logo_path)) {
-        state.active = false;
-        return;
+void BeginIntroFall(IntroState& state) {
+    state.phase = IntroState::Phase::Fall;
+    state.phase_time_ms = 0.0f;
+}
+
+void BeginIntroPause(IntroState& state) {
+    state.phase = IntroState::Phase::Pause;
+    state.phase_time_ms = 0.0f;
+    state.chain_index = 0;
+    state.sim_result = match::core::SimulationResult{};
+}
+
+void BeginIntroSwap(IntroState& state) {
+    state.phase = IntroState::Phase::Swap;
+    state.phase_time_ms = 0.0f;
+    if (g_audio) {
+        g_audio->PlaySwap();
     }
-    SDL_Surface* surface = IMG_Load(logo_path.string().c_str());
-    if (!surface) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to load logo.png: %s", IMG_GetError());
-        state.active = false;
-        return;
+}
+
+void StartNextIntroSequence(IntroState& state) {
+    state.sim_result = match::core::SimulationResult{};
+    if (!FindIntroMove(state.board, state.current_move, state.sim_result)) {
+        SetPresetIntroBoard(state, state.current_move, state.sim_result);
+        if (state.sim_result.chain_events.empty()) {
+            state.active = false;
+            return;
+        }
     }
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    state.logo_w = surface->w;
-    state.logo_h = surface->h;
-    SDL_FreeSurface(surface);
-    if (!texture) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Failed to create logo texture: %s", SDL_GetError());
-        state.active = false;
-        return;
-    }
-    state.logo_texture = texture;
+    state.chain_index = 0;
+    BeginIntroSwap(state);
 }
 
 void UpdateIntroState(IntroState& state, float delta_ms) {
@@ -1399,8 +1513,68 @@ void UpdateIntroState(IntroState& state, float delta_ms) {
         return;
     }
     state.elapsed_ms += delta_ms;
-    if (state.elapsed_ms >= state.min_duration_ms) {
-        state.active = false;
+    state.phase_time_ms += delta_ms;
+
+    switch (state.phase) {
+        case IntroState::Phase::Idle: {
+            StartNextIntroSequence(state);
+            break;
+        }
+        case IntroState::Phase::Swap: {
+            if (state.phase_time_ms >= state.swap_duration_ms) {
+                state.phase_time_ms = 0.0f;
+                state.board.swapCells(state.current_move);
+                BeginIntroClear(state);
+            }
+            break;
+        }
+        case IntroState::Phase::Clear: {
+            if (state.phase_time_ms >= state.clear_duration_ms) {
+                const auto& chain = state.sim_result.chain_events[static_cast<std::size_t>(state.chain_index)];
+                for (const auto& clear : chain.clears) {
+                    for (const auto& cell : clear.cells) {
+                        state.board.set(cell.position, match::core::kEmptyCell);
+                    }
+                }
+                BeginIntroFall(state);
+            }
+            break;
+        }
+        case IntroState::Phase::Fall: {
+            if (state.phase_time_ms >= state.fall_duration_ms) {
+                const auto& chain = state.sim_result.chain_events[static_cast<std::size_t>(state.chain_index)];
+                for (const auto& fall : chain.falls) {
+                    state.board.set(fall.from, match::core::kEmptyCell);
+                }
+                for (const auto& fall : chain.falls) {
+                    state.board.set(fall.to, fall.tile);
+                }
+                for (const auto& spawn : chain.spawns) {
+                    state.board.set(spawn.position, spawn.tile);
+                }
+
+                state.chain_index += 1;
+                if (state.chain_index < state.sim_result.chain_events.size()) {
+                    BeginIntroClear(state);
+                } else {
+                    BeginIntroPause(state);
+                }
+            }
+            break;
+        }
+        case IntroState::Phase::Pause: {
+            if (state.phase_time_ms >= state.pause_duration_ms) {
+                state.cycles_completed += 1;
+                if (state.cycles_completed >= state.max_cycles &&
+                    state.elapsed_ms >= state.min_duration_ms) {
+                    state.active = false;
+                } else {
+                    state.phase = IntroState::Phase::Idle;
+                    state.phase_time_ms = 0.0f;
+                }
+            }
+            break;
+        }
     }
 }
 
@@ -1409,24 +1583,152 @@ void RenderIntro(SDL_Renderer* renderer,
                  int window_w,
                  int window_h,
                  const IntroState& state) {
-    SDL_SetRenderDrawColor(renderer, 10, 10, 12, 255);
+    SDL_SetRenderDrawColor(renderer, 24, 26, 31, 255);
     SDL_RenderClear(renderer);
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    if (state.logo_texture) {
-        const float max_w = window_w * 0.6f;
-        const float max_h = window_h * 0.6f;
-        float scale = 1.0f;
-        if (state.logo_w > 0 && state.logo_h > 0) {
-            scale = std::min(max_w / static_cast<float>(state.logo_w),
-                             max_h / static_cast<float>(state.logo_h));
+    const float min_side = static_cast<float>(std::min(window_w, window_h));
+    const float cell_size = std::max(48.0f, min_side * 0.14f);
+    const float gap = std::max(3.0f, cell_size * 0.08f);
+    const float tile_size = std::max(8.0f, cell_size - gap);
+    const float board_w = cell_size * static_cast<float>(state.cols);
+    const float board_h = cell_size * static_cast<float>(state.rows);
+    const float left = (static_cast<float>(window_w) - board_w) * 0.5f;
+    const float top = (static_cast<float>(window_h) - board_h) * 0.5f;
+
+    auto tile_color = [](int tile) -> SDL_Color {
+        static constexpr std::array<SDL_Color, 6> kColors{{
+            SDL_Color{62, 191, 238, 255},
+            SDL_Color{238, 84, 76, 255},
+            SDL_Color{255, 207, 65, 255},
+            SDL_Color{97, 219, 112, 255},
+            SDL_Color{98, 142, 255, 255},
+            SDL_Color{177, 102, 235, 255},
+        }};
+        if (tile < 0 || tile >= static_cast<int>(kColors.size())) {
+            return SDL_Color{64, 64, 64, 255};
         }
-        scale = std::max(scale, 0.1f);
-        int dst_w = static_cast<int>(std::round(state.logo_w * scale));
-        int dst_h = static_cast<int>(std::round(state.logo_h * scale));
-        SDL_Rect dst{(window_w - dst_w) / 2, (window_h - dst_h) / 2, dst_w, dst_h};
-        SDL_RenderCopy(renderer, state.logo_texture, nullptr, &dst);
+        return kColors[static_cast<std::size_t>(tile)];
+    };
+
+    auto is_in_clear = [&](const match::core::Cell& cell) -> bool {
+        if (state.phase != IntroState::Phase::Clear) {
+            return false;
+        }
+        const auto& chain = state.sim_result.chain_events[static_cast<std::size_t>(state.chain_index)];
+        for (const auto& clear : chain.clears) {
+            for (const auto& cleared : clear.cells) {
+                if (cleared.position == cell) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    SDL_FRect board_rect{left, top, board_w, board_h};
+    SDL_SetRenderDrawColor(renderer, 24, 26, 31, 255);
+    SDL_RenderFillRectF(renderer, &board_rect);
+
+    auto draw_tile = [&](const match::core::Cell& cell, int tile, float x, float y, float alpha_scale) {
+        SDL_Color c = tile_color(tile);
+        c.a = static_cast<Uint8>(static_cast<float>(c.a) * std::clamp(alpha_scale, 0.0f, 1.0f));
+        SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a);
+        const float half = tile_size * 0.5f;
+        SDL_FRect rect{x - half, y - half, tile_size, tile_size};
+        SDL_RenderFillRectF(renderer, &rect);
+    };
+
+    auto should_hide_base = [&](const match::core::Cell& cell) {
+        if (state.phase == IntroState::Phase::Swap) {
+            return cell == state.current_move.a || cell == state.current_move.b;
+        }
+        if (state.phase == IntroState::Phase::Clear) {
+            return is_in_clear(cell);
+        }
+        if (state.phase == IntroState::Phase::Fall) {
+            const auto& chain =
+                state.sim_result.chain_events[static_cast<std::size_t>(state.chain_index)];
+            for (const auto& fall : chain.falls) {
+                if (fall.to == cell || fall.from == cell) {
+                    return true;
+                }
+            }
+            for (const auto& spawn : chain.spawns) {
+                if (spawn.position == cell) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    // Draw stationary tiles
+    for (int col = 0; col < state.board.cols(); ++col) {
+        for (int row = 0; row < state.board.rows(); ++row) {
+            match::core::Cell cell{col, row};
+            if (should_hide_base(cell)) {
+                continue;
+            }
+            const int tile = state.board.get(cell);
+            if (tile == match::core::kEmptyCell) {
+                continue;
+            }
+            SDL_FPoint center = IntroCellCenter(window_w, window_h, state.cols, state.rows, cell_size, cell);
+            draw_tile(cell, tile, center.x, center.y, 1.0f);
+        }
     }
+
+    // Swap animation
+    if (state.phase == IntroState::Phase::Swap) {
+        float t = std::clamp(state.phase_time_ms / state.swap_duration_ms, 0.0f, 1.0f);
+        SDL_FPoint a_start = IntroCellCenter(window_w, window_h, state.cols, state.rows, cell_size, state.current_move.a);
+        SDL_FPoint b_start = IntroCellCenter(window_w, window_h, state.cols, state.rows, cell_size, state.current_move.b);
+        SDL_FPoint a_pos{a_start.x + (b_start.x - a_start.x) * t, a_start.y + (b_start.y - a_start.y) * t};
+        SDL_FPoint b_pos{b_start.x + (a_start.x - b_start.x) * t, b_start.y + (a_start.y - b_start.y) * t};
+        draw_tile(state.current_move.a, state.board.get(state.current_move.a), a_pos.x, a_pos.y, 1.0f);
+        draw_tile(state.current_move.b, state.board.get(state.current_move.b), b_pos.x, b_pos.y, 1.0f);
+    }
+
+    // Clear animation
+    if (state.phase == IntroState::Phase::Clear) {
+        float t = std::clamp(state.phase_time_ms / state.clear_duration_ms, 0.0f, 1.0f);
+        float alpha = 1.0f - t;
+        const auto& chain = state.sim_result.chain_events[static_cast<std::size_t>(state.chain_index)];
+        for (const auto& clear : chain.clears) {
+            for (const auto& cell : clear.cells) {
+                SDL_FPoint center =
+                    IntroCellCenter(window_w, window_h, state.cols, state.rows, cell_size, cell.position);
+                draw_tile(cell.position, cell.tile, center.x, center.y, alpha);
+            }
+        }
+    }
+
+    // Fall animation
+    if (state.phase == IntroState::Phase::Fall) {
+        float t = std::clamp(state.phase_time_ms / state.fall_duration_ms, 0.0f, 1.0f);
+        const auto& chain = state.sim_result.chain_events[static_cast<std::size_t>(state.chain_index)];
+        for (const auto& fall : chain.falls) {
+            SDL_FPoint from =
+                IntroCellCenter(window_w, window_h, state.cols, state.rows, cell_size, fall.from);
+            SDL_FPoint to = IntroCellCenter(window_w, window_h, state.cols, state.rows, cell_size, fall.to);
+            SDL_FPoint pos{from.x + (to.x - from.x) * t, from.y + (to.y - from.y) * t};
+            draw_tile(fall.from, fall.tile, pos.x, pos.y, 1.0f);
+        }
+        for (const auto& spawn : chain.spawns) {
+            SDL_FPoint target =
+                IntroCellCenter(window_w, window_h, state.cols, state.rows, cell_size, spawn.position);
+            SDL_FPoint start{target.x, target.y - cell_size * static_cast<float>(spawn.distance_cells)};
+            SDL_FPoint pos{start.x + (target.x - start.x) * t, start.y + (target.y - start.y) * t};
+            draw_tile(spawn.position, spawn.tile, pos.x, pos.y, t);
+        }
+    }
+
+    SDL_Color text_color{235, 239, 245, 255};
+    int text_y = static_cast<int>(top + board_h + std::max(12.0f, gap * 1.5f));
+    TTF_Font* intro_font = fonts.heading ? fonts.heading : fonts.body;
+    DrawTextCentered(renderer, intro_font, "MATCH by Vovkinshteyn",
+                     window_w / 2, text_y, text_color);
 }
 
 match::ui::SaveSummary BuildSaveSummary(match::platform::SdlSaveService& service,
@@ -2805,16 +3107,8 @@ int main(int /*argc*/, char* /*argv*/[]) {
     }
     IntroState intro_state;
     intro_state.min_duration_ms = kIntroMinimumDurationMs;
+    intro_state.board = MakeIntroBoard(intro_state.cols, intro_state.rows);
     bool music_started = false;
-    if (audio_ready) {
-        float intro_audio_ms = audio.PlayIntro();
-        if (intro_audio_ms > 0.0f) {
-            intro_state.min_duration_ms = std::max(intro_state.min_duration_ms, intro_audio_ms);
-        }
-    }
-    if (img_ready) {
-        TryLoadIntroLogo(renderer, intro_state);
-    }
 
     match::ui::GameSettings ui_settings;
     ui_settings.EnsureConstraints();
@@ -2935,9 +3229,6 @@ int main(int /*argc*/, char* /*argv*/[]) {
     auto set_game_settings_title = [&]() { set_window_title("MATCH — Game Settings"); };
     auto set_tournament_bracket_title = [&]() { set_window_title("MATCH — Tournament Bracket"); };
 
-    if (!intro_state.logo_texture) {
-        intro_state.active = false;
-    }
     if (!intro_state.active) {
         current_screen = AppScreen::MainMenu;
         set_main_menu_title();
@@ -2992,7 +3283,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
         game_ctx.save_slot_display = pending_save_display;
         game_ctx.save_slot_file = pending_save_filename;
         game_ctx.autosave_enabled = !game_ctx.save_slot_file.empty();
-        game_ctx.autosave_dirty = true;
+        game_ctx.autosave_dirty = false;
         game_ctx.autosave_cooldown_ms = 0.0f;
         game_ctx.loaded_from_save = false;
         game_ctx.blitz_turn_total_ms = ui_settings.blitz_turn_minutes * 60.0f * 1000.0f;
@@ -4086,7 +4377,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
             }
         }
 
-        SDL_SetRenderDrawColor(renderer, 10, 10, 12, 255);
+        SDL_SetRenderDrawColor(renderer, 24, 26, 31, 255);
         SDL_RenderClear(renderer);
 
         const bool render_using_controller = (last_input_mode == InputMode::Controller);

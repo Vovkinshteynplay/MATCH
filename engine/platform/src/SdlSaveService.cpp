@@ -29,7 +29,11 @@ SdlSaveService::SdlSaveService(std::filesystem::path root)
 }
 
 bool SdlSaveService::Initialize() {
-    return EnsureRootExists();
+    std::error_code ec;
+    if (std::filesystem::exists(root_, ec) && !std::filesystem::is_directory(root_, ec)) {
+        return false;
+    }
+    return true;
 }
 
 bool SdlSaveService::EnsureRootExists() const {
