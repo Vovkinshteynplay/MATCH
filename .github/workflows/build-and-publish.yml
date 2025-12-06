@@ -106,15 +106,14 @@ jobs:
           cp -a assets_common/. "$APPDIR/usr/bin/assets/"
           if [ -d assets_linux ]; then cp -a assets_linux/. "$APPDIR/usr/bin/assets/"; fi
           DESKTOP_FILE="$APPDIR/usr/share/applications/match.desktop"
-          cat > "$DESKTOP_FILE" <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=MATCH
-Exec=MATCH
-Icon=match
-Categories=Game;
-Terminal=false
-EOF
+          printf '%s\n' \
+            "[Desktop Entry]" \
+            "Type=Application" \
+            "Name=MATCH" \
+            "Exec=MATCH" \
+            "Icon=match" \
+            "Categories=Game;" \
+            "Terminal=false" > "$DESKTOP_FILE"
           if [ -f assets_linux/icon.png ]; then
             cp assets_linux/icon.png "$APPDIR/usr/share/icons/hicolor/256x256/apps/match.png"
           elif [ -f assets_common/icon.png ]; then
