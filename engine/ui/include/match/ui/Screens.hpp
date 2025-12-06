@@ -60,19 +60,8 @@ inline void GameSettings::EnsureConstraints() {
     }
     for (int i = 0; i < player_count; ++i) {
         auto& name = player_names[static_cast<std::size_t>(i)];
-        if (name.empty()) {
-            name = (mode == GameMode::PvC && i == player_count - 1)
-                       ? "Computer"
-                       : MakeDefaultPlayerName(i);
-        }
         if (mode == GameMode::PvC && i == player_count - 1) {
-            if (name.find("Computer") == std::string::npos) {
-                name += " (Computer)";
-            }
-        } else {
-            if (name.find("Computer") != std::string::npos) {
-                name = MakeDefaultPlayerName(i);
-            }
+            name = "computer";
         }
     }
     moves_per_round = std::clamp(moves_per_round, kMinMovesPerRound, kMaxMovesPerRound);
@@ -87,7 +76,7 @@ inline bool GameSettings::player_is_cpu(int index) const {
 
 struct MenuState {
     int selected = 0;
-    std::array<SDL_Rect, 5> button_bounds{};
+    std::array<SDL_Rect, 6> button_bounds{};
     int axis_vertical = 0;
     Uint32 axis_vertical_tick = 0;
 };
@@ -97,6 +86,7 @@ enum class MenuAction {
     StartPvC,
     StartPvP,
     StartTournament,
+    Rules,
     Settings,
     Quit
 };
@@ -185,7 +175,7 @@ struct BlitzSettingsState {
     Uint32 axis_horizontal_tick = 0;
 };
 
-enum class BlitzSettingsAction { None, Continue, Back };
+enum class BlitzSettingsAction { None, Adjust, Continue, Back };
 
 BlitzSettingsAction HandleBlitzSettingsEvent(BlitzSettingsState& state,
                                              const match::platform::InputEvent& evt,
@@ -280,6 +270,9 @@ struct SettingsState {
     Uint32 axis_vertical_tick = 0;
     Uint32 axis_horizontal_tick = 0;
     bool last_activation_from_controller = false;
+    bool had_adjustment = false;
+    int last_selected_snapshot = 0;
+    bool back_via_escape = false;
 };
 
 struct DisplaySettingsState {
@@ -342,6 +335,24 @@ struct OskState {
 };
 
 enum class OskAction { None, Commit, Cancel };
+
+struct RulesState {
+    int scroll = 0;
+    int max_scroll = 0;
+    SDL_Rect back_button{0, 0, 0, 0};
+    bool back_hovered = false;
+};
+
+enum class RulesAction { None, BackSilent, BackClick };
+
+RulesAction HandleRulesEvent(RulesState& state,
+                             const match::platform::InputEvent& evt,
+                             bool using_controller);
+void RenderRules(SDL_Renderer* renderer,
+                 const match::render::Fonts& fonts,
+                 int window_width,
+                 int window_height,
+                 RulesState& state);
 
 void BeginOsk(OskState& state,
               const std::string& title,

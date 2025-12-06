@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <filesystem>
 #include <map>
+#include <unordered_map>
 #include <optional>
 #include <random>
 #include <numeric>
@@ -600,7 +601,7 @@ bool CellFromPoint(const Layout& layout,
 struct GameContext {
     std::string mode = "PvC";
     int players_count = 2;
-    std::vector<std::string> player_names = {"Player 1", "Computer"};
+    std::vector<std::string> player_names = {"Player 1", "computer"};
     std::vector<int> player_scores = {0, 0};
     std::vector<int> moves_left_per_player = {3, 3};
     int round_current = 1;
@@ -623,6 +624,7 @@ struct GameContext {
     bool autosave_dirty = false;
     float autosave_cooldown_ms = 0.0f;
     bool loaded_from_save = false;
+    bool pending_save_cleanup = false;
     match::ui::TimeModeOption time_mode = match::ui::TimeModeOption::Classic;
     int blitz_turn_minutes = 2;
     int blitz_between_seconds = 10;
@@ -1047,14 +1049,13 @@ void UpdateAiPending(GameContext& ctx) {
 }
 
 bool IsComputerPlayer(const GameContext& ctx, int index) {
-    if (index < 0 || index >= static_cast<int>(ctx.player_names.size())) {
+    if (ctx.mode != "PvC") {
         return false;
     }
-    std::string name = ctx.player_names[static_cast<std::size_t>(index)];
-    for (auto& ch : name) {
-        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if (index < 0 || index >= ctx.players_count) {
+        return false;
     }
-    return name.find("computer") != std::string::npos;
+    return index == ctx.players_count - 1;
 }
 
 bool ActivePlayerIsHuman(const GameContext& ctx) {
@@ -1109,6 +1110,11 @@ void RandomizePlayerOrder(GameContext& ctx) {
     if (ctx.players_count <= 1) {
         return;
     }
+    if (ctx.mode == "PvC") {
+        ctx.active_player = 0;
+        ctx.last_player_index = -1;
+        return;
+    }
     std::vector<int> order(static_cast<std::size_t>(ctx.players_count));
     std::iota(order.begin(), order.end(), 0);
     std::mt19937 rng(std::random_device{}());
@@ -1142,16 +1148,63 @@ void RandomizePlayerOrder(GameContext& ctx) {
 }
 
 std::string EnsureComputerName(std::string name) {
-    std::string lower = name;
-    std::transform(lower.begin(), lower.end(), lower.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    if (lower.find("computer") == std::string::npos) {
-        if (!name.empty()) {
-            name += ' ';
-        }
-        name += "(Computer)";
+    (void)name;
+    return "computer";
+}
+
+std::string TrimString(const std::string& value) {
+    std::string out = value;
+    while (!out.empty() && std::isspace(static_cast<unsigned char>(out.front()))) {
+        out.erase(out.begin());
     }
-    return name;
+    while (!out.empty() && std::isspace(static_cast<unsigned char>(out.back()))) {
+        out.pop_back();
+    }
+    return out;
+}
+
+std::vector<std::string> BuildDisplayNames(const GameContext& ctx) {
+    std::vector<std::string> names = ctx.player_names;
+    if (names.size() < static_cast<std::size_t>(ctx.players_count)) {
+        names.resize(static_cast<std::size_t>(ctx.players_count));
+    }
+
+    std::unordered_map<std::string, int> counts;
+    std::vector<std::string> trimmed(names.size());
+    trimmed.reserve(names.size());
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        std::string t = TrimString(names[i]);
+        std::string lowered = t;
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        trimmed[i] = t;
+        if (!lowered.empty()) {
+            counts[lowered] += 1;
+        }
+    }
+
+    std::vector<std::string> display(names.size());
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        std::string lowered = trimmed[i];
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        bool invalid = trimmed[i].empty();
+        bool duplicate = !lowered.empty() && counts[lowered] > 1;
+        if (invalid || duplicate) {
+            display[i] = match::ui::MakeDefaultPlayerName(static_cast<int>(i));
+        } else {
+            display[i] = trimmed[i];
+        }
+    }
+    return display;
+}
+
+std::string PlayerDisplayName(const GameContext& ctx, int index) {
+    auto names = BuildDisplayNames(ctx);
+    if (index >= 0 && index < static_cast<int>(names.size())) {
+        return names[static_cast<std::size_t>(index)];
+    }
+    return "Player";
 }
 
 struct SaveNameComponents {
@@ -1185,10 +1238,6 @@ SaveNameComponents SanitizeSaveName(const std::string& input) {
     }
     result.display = cleaned;
     result.filename = cleaned;
-    std::replace(result.filename.begin(), result.filename.end(), ' ', '_');
-    if (result.filename.empty()) {
-        result.filename = "Save";
-    }
     return result;
 }
 
@@ -1873,10 +1922,11 @@ PanelInfo BuildPanelInfo(const GameContext& ctx) {
     panel.moves_left = moves_left_current;
     panel.status = ctx.status.empty() ? "Ready" : ctx.status;
 
+    auto display_names = BuildDisplayNames(ctx);
     panel.players.reserve(ctx.player_names.size());
     for (std::size_t i = 0; i < ctx.player_names.size(); ++i) {
         PanelPlayerEntry entry;
-        entry.name = ctx.player_names[i];
+        entry.name = (i < display_names.size()) ? display_names[i] : match::ui::MakeDefaultPlayerName(static_cast<int>(i));
         entry.score = (i < ctx.player_scores.size()) ? ctx.player_scores[i] : 0;
         entry.active = static_cast<int>(i) == ctx.active_player;
         if (i < ctx.moves_left_per_player.size()) {
@@ -1947,11 +1997,8 @@ struct BoardState {
 
 std::string ActivePlayerLabel(const GameContext& ctx) {
     if (ctx.active_player >= 0 &&
-        ctx.active_player < static_cast<int>(ctx.player_names.size())) {
-        return ctx.player_names[static_cast<std::size_t>(ctx.active_player)];
-    }
-    if (ctx.active_player >= 0) {
-        return "Player " + std::to_string(ctx.active_player + 1);
+        ctx.active_player < ctx.players_count) {
+        return PlayerDisplayName(ctx, ctx.active_player);
     }
     return "Player";
 }
@@ -1975,7 +2022,7 @@ std::string WinnersSubtitle(const GameContext& ctx) {
     std::vector<std::string> winners;
     for (std::size_t i = 0; i < ctx.player_scores.size() && i < ctx.player_names.size(); ++i) {
         if (ctx.player_scores[i] == best) {
-            winners.push_back(ctx.player_names[i]);
+            winners.push_back(PlayerDisplayName(ctx, static_cast<int>(i)));
         }
     }
     if (winners.empty()) {
@@ -2189,6 +2236,9 @@ void HandleStateFeedback(GameContext& ctx,
         if (ctx.mode == "Tournament") {
             RecordTournamentResult(ctx);
         }
+        if (!ctx.save_slot_file.empty()) {
+            ctx.pending_save_cleanup = true;
+        }
         return;
     }
     if (ctx.game_over) {
@@ -2381,6 +2431,13 @@ bool ApplySavePayload(const match::core::SavePayload& payload,
         ctx.blitz_pre_turn_active = data.value("blitz_pre_turn_active", false);
         ctx.blitz_turn_active = data.value("blitz_turn_active", false);
         ctx.game_over = data.value("game_over", ctx.game_over);
+        if (ctx.mode == "PvC") {
+            ctx.players_count = 2;
+            if (ctx.player_names.size() < 2) {
+                ctx.player_names.resize(2, "computer");
+            }
+            ctx.player_names[1] = "computer";
+        }
         SyncPlayerVectors(ctx);
         if (ctx.moves_left_per_player.empty()) {
             ctx.moves_left_per_player.assign(ctx.players_count, ctx.moves_per_round_setting);
@@ -2395,6 +2452,7 @@ bool ApplySavePayload(const match::core::SavePayload& payload,
         ctx.autosave_dirty = false;
         ctx.autosave_cooldown_ms = 0.0f;
         ctx.loaded_from_save = true;
+        ctx.pending_save_cleanup = false;
 
         if (payload.meta.contains("save_name") && payload.meta["save_name"].is_string()) {
             ctx.save_slot_display = payload.meta["save_name"].get<std::string>();
@@ -3127,6 +3185,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
     match::ui::SaveDetailState save_detail_state;
     PauseMenuState pause_menu_state;
     match::ui::TournamentBracketState tournament_bracket_state;
+    match::ui::RulesState rules_state;
     bool pause_menu_active = false;
     bool text_input_active = false;
     auto start_text_input = [&]() {
@@ -3147,6 +3206,11 @@ int main(int /*argc*/, char* /*argv*/[]) {
     match::ui::SettingsState settings_state(ui_settings);
     match::ui::DisplaySettingsState display_settings_state;
     match::ui::OskState osk_state;
+    auto reset_ui_settings = [&]() {
+        ui_settings = match::ui::GameSettings{};
+        ui_settings.EnsureConstraints();
+        settings_state.RefreshEntries();
+    };
     auto deactivate_osk = [&]() {
         if (osk_state.text_input_mode) {
             stop_text_input();
@@ -3164,6 +3228,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
         MainMenu,
         SaveSetup,
         SaveDetail,
+        Rules,
         NamePrompt,
         TimeMode,
         BlitzSettings,
@@ -3234,6 +3299,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
         set_main_menu_title();
     }
     auto start_new_game = [&]() {
+        ui_settings.EnsureConstraints();
         match::core::Board::Rules rules;
         rules.cols = kBoardCols;
         rules.rows = kBoardRows;
@@ -3382,14 +3448,13 @@ int main(int /*argc*/, char* /*argv*/[]) {
         if (!g_tournament.active) {
             return;
         }
-        match::ui::GameSettings restored_settings = g_tournament.base_settings;
         std::string subtitle = TournamentWinnersSummary();
         float sound_ms = PlayWinSound();
         ShowBannerMessage("Tournament Complete", subtitle, std::max(4200.0f, sound_ms + 500.0f), true, true);
         ResetTournamentState();
-        ui_settings = restored_settings;
         current_screen = AppScreen::MainMenu;
         set_main_menu_title();
+        reset_ui_settings();
         pause_menu_active = false;
         SDL_ShowCursor(SDL_ENABLE);
     };
@@ -3413,6 +3478,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
             current_screen = AppScreen::MainMenu;
             set_main_menu_title();
             SDL_ShowCursor(SDL_ENABLE);
+            reset_ui_settings();
         }
     };
 
@@ -3426,6 +3492,33 @@ int main(int /*argc*/, char* /*argv*/[]) {
         save_service = match::platform::SdlSaveService(target);
         save_service.Initialize();
         save_slots_dirty = true;
+    };
+
+    auto cleanup_finished_save = [&]() {
+        if (!game_ctx.pending_save_cleanup) {
+            return;
+        }
+        if (!game_ctx.save_slot_file.empty()) {
+            save_service.Delete(game_ctx.save_slot_file);
+        }
+        game_ctx.save_slot_file.clear();
+        game_ctx.autosave_enabled = false;
+        game_ctx.loaded_from_save = false;
+        game_ctx.pending_save_cleanup = false;
+        save_slots_dirty = true;
+
+        std::error_code ec;
+        auto root = save_service.root();
+        bool empty = true;
+        for (auto it = std::filesystem::directory_iterator(root, ec); !ec && it != std::filesystem::directory_iterator{}; ++it) {
+            if (it->is_regular_file()) {
+                empty = false;
+                break;
+            }
+        }
+        if (empty && std::filesystem::exists(root, ec)) {
+            std::filesystem::remove(root, ec);
+        }
     };
 
     auto refresh_save_slots = [&]() {
@@ -3604,6 +3697,11 @@ int main(int /*argc*/, char* /*argv*/[]) {
         current_screen = AppScreen::SaveSetup;
         set_save_setup_title();
     };
+    auto show_rules = [&]() {
+        current_screen = AppScreen::Rules;
+        set_window_title("MATCH — Rules");
+        rules_state.scroll = 0;
+    };
     while (running) {
         int current_w = 0;
         int current_h = 0;
@@ -3776,6 +3874,9 @@ int main(int /*argc*/, char* /*argv*/[]) {
                             last_input_mode = InputMode::MouseKeyboard;
                             SDL_ShowCursor(SDL_ENABLE);
                         }
+                    } else if (action == match::ui::MenuAction::Rules) {
+                        PlayClickSound();
+                        show_rules();
                     } else if (action == match::ui::MenuAction::Settings) {
                         PlayClickSound();
                         deactivate_osk();
@@ -3940,6 +4041,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
                         case match::ui::TimeModeAction::None:
                             break;
                         case match::ui::TimeModeAction::Classic:
+                            PlayClickSound();
                             ui_settings.time_mode = match::ui::TimeModeOption::Classic;
                             game_settings_return_screen = AppScreen::TimeMode;
                             current_screen = AppScreen::GameSettings;
@@ -3947,6 +4049,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
                                 set_game_settings_title();
                             break;
                         case match::ui::TimeModeAction::Blitz:
+                            PlayClickSound();
                             ui_settings.time_mode = match::ui::TimeModeOption::Blitz;
                             blitz_state.minutes = ui_settings.blitz_turn_minutes;
                             blitz_state.between_seconds = ui_settings.blitz_between_seconds;
@@ -3955,6 +4058,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
                             set_blitz_settings_title();
                             break;
                         case match::ui::TimeModeAction::Back:
+                            PlayClickSound();
                             current_screen = AppScreen::NamePrompt;
                             set_name_prompt_title();
                             if (last_input_mode == InputMode::MouseKeyboard) {
@@ -3972,7 +4076,11 @@ int main(int /*argc*/, char* /*argv*/[]) {
                     switch (action) {
                         case match::ui::BlitzSettingsAction::None:
                             break;
+                        case match::ui::BlitzSettingsAction::Adjust:
+                            PlayClickSound();
+                            break;
                         case match::ui::BlitzSettingsAction::Continue:
+                            PlayClickSound();
                             ui_settings.blitz_turn_minutes = blitz_state.minutes;
                             ui_settings.blitz_between_seconds = blitz_state.between_seconds;
                             game_settings_return_screen = AppScreen::TimeMode;
@@ -3981,6 +4089,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
                                 set_game_settings_title();
                             break;
                         case match::ui::BlitzSettingsAction::Back:
+                            PlayClickSound();
                             current_screen = AppScreen::TimeMode;
                             set_time_mode_title();
                             break;
@@ -4002,11 +4111,22 @@ int main(int /*argc*/, char* /*argv*/[]) {
                             }
                             break;
                         case match::ui::DisplaySettingsAction::Back:
-                            PlayClickSound();
                             current_screen = AppScreen::MainMenu;
                             set_main_menu_title();
                             display_settings_state.selected = 0;
                             break;
+                    }
+                    break;
+                }
+                case AppScreen::Rules: {
+                    auto action = match::ui::HandleRulesEvent(rules_state, evt, using_controller);
+                    if (action == match::ui::RulesAction::BackClick) {
+                        PlayClickSound();
+                    }
+                    if (action == match::ui::RulesAction::BackClick ||
+                        action == match::ui::RulesAction::BackSilent) {
+                        current_screen = AppScreen::MainMenu;
+                        set_main_menu_title();
                     }
                     break;
                 }
@@ -4016,6 +4136,16 @@ int main(int /*argc*/, char* /*argv*/[]) {
                             match::ui::HandleOskEvent(osk_state, evt, using_controller, current_w, current_h);
                         if (osk_action == match::ui::OskAction::Commit) {
                             PlayClickSound();
+                            if (settings_state.pending_player_index >= 0 &&
+                                settings_state.pending_player_index < static_cast<int>(ui_settings.player_names.size())) {
+                                std::size_t idx = static_cast<std::size_t>(settings_state.pending_player_index);
+                                std::string trimmed = TrimString(ui_settings.player_names[idx]);
+                                if (trimmed.empty()) {
+                                    ui_settings.player_names[idx] = match::ui::MakeDefaultPlayerName(static_cast<int>(idx));
+                                } else {
+                                    ui_settings.player_names[idx] = trimmed;
+                                }
+                            }
                             deactivate_osk();
                             ui_settings.EnsureConstraints();
                             settings_state.RefreshEntries();
@@ -4027,11 +4157,16 @@ int main(int /*argc*/, char* /*argv*/[]) {
                     }
                     auto action =
                         match::ui::HandleSettingsEvent(settings_state, evt, using_controller, current_w, current_h);
+                    if (settings_state.had_adjustment && action == match::ui::SettingsAction::None) {
+                        PlayClickSound();
+                    }
                     switch (action) {
                         case match::ui::SettingsAction::None:
                             break;
                         case match::ui::SettingsAction::Back:
-                            PlayClickSound();
+                            if (!settings_state.back_via_escape) {
+                                PlayClickSound();
+                            }
                             current_screen = game_settings_return_screen;
                             deactivate_osk();
                             if (current_screen == AppScreen::TimeMode) {
@@ -4070,7 +4205,8 @@ int main(int /*argc*/, char* /*argv*/[]) {
                             ui_settings.EnsureConstraints();
                             int index = settings_state.pending_player_index;
                             if (index < 0 ||
-                                index >= static_cast<int>(ui_settings.player_names.size())) {
+                                index >= static_cast<int>(ui_settings.player_names.size()) ||
+                                ui_settings.player_is_cpu(index)) {
                                 break;
                             }
                             deactivate_osk();
@@ -4146,6 +4282,8 @@ int main(int /*argc*/, char* /*argv*/[]) {
                                 g_win_announced = false;
                                 if (g_tournament.active) {
                                     ui_settings = g_tournament.base_settings;
+                                } else {
+                                    reset_ui_settings();
                                 }
                                 ResetTournamentState();
                                 PlayClickSound();
@@ -4269,6 +4407,7 @@ int main(int /*argc*/, char* /*argv*/[]) {
             static_cast<float>((now - last_counter) * 1000.0 / frequency);
         last_counter = now;
         UpdateBannerOverlay(delta_ms);
+        cleanup_finished_save();
 
         if (current_screen == AppScreen::Intro) {
             UpdateIntroState(intro_state, delta_ms);
@@ -4391,6 +4530,12 @@ int main(int /*argc*/, char* /*argv*/[]) {
         if (current_screen == AppScreen::MainMenu) {
             match::ui::RenderMenu(renderer, fonts, current_w, current_h, menu_state,
                                   render_using_controller);
+            SDL_RenderPresent(renderer);
+            continue;
+        }
+
+        if (current_screen == AppScreen::Rules) {
+            match::ui::RenderRules(renderer, fonts, current_w, current_h, rules_state);
             SDL_RenderPresent(renderer);
             continue;
         }

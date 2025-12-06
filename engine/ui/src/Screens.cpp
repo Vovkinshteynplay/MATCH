@@ -402,8 +402,10 @@ MenuAction MenuActionForIndex(int index) {
         case 2:
             return MenuAction::StartTournament;
         case 3:
-            return MenuAction::Settings;
+            return MenuAction::Rules;
         case 4:
+            return MenuAction::Settings;
+        case 5:
             return MenuAction::Quit;
         default:
             return MenuAction::None;
@@ -411,7 +413,7 @@ MenuAction MenuActionForIndex(int index) {
 }
 
 int MenuCount() {
-    return 5;
+    return 6;
 }
 
 void UpdateMenuSelection(MenuState& state, int delta) {
@@ -530,22 +532,24 @@ void RenderMenu(SDL_Renderer* renderer,
         RenderCenteredText(renderer, title_font, window_width, panel.y - UiPx(metrics, 40.0f), "MATCH", kTextPrimary);
     }
 
-    const std::array<std::string, 5> labels{
+    const std::array<std::string, 6> labels{
         "Player vs Computer",
         "Player vs Player",
         "Tournament",
+        "Rules",
         "Settings",
         "Quit"};
-    const std::array<std::string, 5> descriptions{
+    const std::array<std::string, 6> descriptions{
         "Face an AI opponent with custom settings",
         "Play locally against another player",
         "Run a multi-player tournament",
+        "Learn the key rules and mechanics",
         "Adjust display and gameplay options",
         "Close MATCH"};
 
-    int y = panel.y + UiPx(metrics, 100.0f);
-    const int button_height = UiPx(metrics, 82.0f);
-    const int button_gap = UiPx(metrics, 24.0f);
+    int y = panel.y + UiPx(metrics, 70.0f);
+    const int button_height = UiPx(metrics, 70.0f);
+    const int button_gap = UiPx(metrics, 16.0f);
     const int button_left = panel.x + UiPx(metrics, 48.0f);
     const int button_width = panel.w - UiPx(metrics, 96.0f);
 
@@ -575,6 +579,214 @@ void RenderMenu(SDL_Renderer* renderer,
 
     DrawInfoBar(renderer, fonts, window_width, window_height,
                 descriptions[static_cast<std::size_t>(state.selected)]);
+}
+
+RulesAction HandleRulesEvent(RulesState& state,
+                             const match::platform::InputEvent& evt,
+                             bool using_controller) {
+    (void)using_controller;
+    const int scroll_step = 40;
+    switch (evt.type) {
+        case match::platform::InputEventType::MouseWheel: {
+            int delta = (evt.wheel_y > 0) ? -scroll_step : scroll_step;
+            state.scroll = std::clamp(state.scroll + delta, 0, std::max(0, state.max_scroll));
+            break;
+        }
+        case match::platform::InputEventType::MouseButtonDown: {
+            if (evt.mouse_button == match::platform::MouseButton::Left) {
+                if (PointInRect(state.back_button, evt.x, evt.y)) {
+                    return RulesAction::BackClick;
+                }
+            } else if (evt.mouse_button == match::platform::MouseButton::Right) {
+                return RulesAction::BackSilent;
+            }
+            break;
+        }
+        case match::platform::InputEventType::MouseMove: {
+            state.back_hovered = PointInRect(state.back_button, evt.x, evt.y);
+            break;
+        }
+        case match::platform::InputEventType::KeyDown: {
+            using match::platform::KeyCode;
+            if (evt.key == KeyCode::Escape) {
+                return RulesAction::BackSilent;
+            }
+            if (evt.key == KeyCode::Enter) {
+                return RulesAction::BackClick;
+            }
+            if (evt.key == KeyCode::Down || evt.key == KeyCode::S) {
+                state.scroll = std::clamp(state.scroll + scroll_step, 0, std::max(0, state.max_scroll));
+            } else if (evt.key == KeyCode::Up || evt.key == KeyCode::W) {
+                state.scroll = std::clamp(state.scroll - scroll_step, 0, std::max(0, state.max_scroll));
+            }
+            break;
+        }
+        case match::platform::InputEventType::ControllerButtonDown: {
+            using match::platform::ControllerButton;
+            switch (evt.controller_button) {
+                case ControllerButton::DPadDown:
+                    state.scroll = std::clamp(state.scroll + scroll_step, 0, std::max(0, state.max_scroll));
+                    break;
+                case ControllerButton::DPadUp:
+                    state.scroll = std::clamp(state.scroll - scroll_step, 0, std::max(0, state.max_scroll));
+                    break;
+                case ControllerButton::A:
+                    return RulesAction::BackClick;
+                case ControllerButton::B:
+                case ControllerButton::Menu:
+                    return RulesAction::BackSilent;
+                default:
+                    break;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    return RulesAction::None;
+}
+
+void RenderRules(SDL_Renderer* renderer,
+                 const match::render::Fonts& fonts,
+                 int window_width,
+                 int window_height,
+                 RulesState& state) {
+    UiMetrics metrics = ComputeUiMetrics(window_width, window_height);
+    SDL_SetRenderDrawColor(renderer, kBackground.r, kBackground.g, kBackground.b, 255);
+    SDL_RenderClear(renderer);
+
+    SDL_Rect panel = PanelCentered(metrics, 960.0f, 720.0f, -10.0f);
+    DrawPanel(renderer, panel, kPanelFill, kPanelBorder);
+
+    TTF_Font* title_font = fonts.heading ? fonts.heading : fonts.body;
+    // Use the larger heading font for better readability of paragraphs too.
+    TTF_Font* body_font = fonts.heading ? fonts.heading : fonts.body;
+    if (title_font) {
+        RenderCenteredText(renderer, title_font, window_width, panel.y - UiPx(metrics, 32.0f), "Rules", kTextPrimary);
+    }
+
+    SDL_Rect inner{panel.x + UiPx(metrics, 40.0f),
+                   panel.y + UiPx(metrics, 40.0f),
+                   panel.w - UiPx(metrics, 80.0f),
+                   panel.h - UiPx(metrics, 140.0f)};
+    SDL_SetRenderDrawColor(renderer, kPanelBorder.r, kPanelBorder.g, kPanelBorder.b, kPanelBorder.a);
+    SDL_RenderDrawRect(renderer, &inner);
+
+    struct Section {
+        const char* title;
+        const char* text;
+    };
+    static const std::array<Section, 5> sections{{
+        {"Goal", "Swap adjacent tiles to create lines of three or more matching colors. Longer chains increase your score through cascades."},
+        {"Valid Matches", "Horizontal, vertical, L-shaped, T-shaped, and plus-shaped (+) clears all count and combine into one resolve."},
+        {"Bomb Rule", "When Bombs are enabled, matching a 2x2 square detonates a 4x4 area, clearing those tiles and giving bonus points."},
+        {"Color Blast", "With Color Blast enabled, any tile touching the matched group and sharing its color also clears. Build wide matches to sweep clusters."},
+        {"Turn Flow", "Every swap must produce a match or special effect. Cascades resolve automatically, and all cleared tiles add to the current player's score."},
+    }};
+
+    auto wrap_lines = [&](const std::string& text, int max_w) -> std::vector<std::string> {
+        std::vector<std::string> result;
+        std::istringstream iss(text);
+        std::string word;
+        std::string line;
+        while (iss >> word) {
+            std::string test = line.empty() ? word : line + " " + word;
+            int w = 0;
+            if (body_font) {
+                TTF_SizeUTF8(body_font, test.c_str(), &w, nullptr);
+            }
+            if (w > max_w && !line.empty()) {
+                result.push_back(line);
+                line = word;
+            } else {
+                line = test;
+            }
+        }
+        if (!line.empty()) {
+            result.push_back(line);
+        }
+        return result;
+    };
+
+    int y_cursor = 0;
+    std::vector<std::pair<std::string, int>> lines;
+    for (const auto& section : sections) {
+        if (body_font) {
+            lines.emplace_back(std::string(section.title), y_cursor);
+            int h = 0;
+            TTF_SizeUTF8(body_font, section.title, nullptr, &h);
+            y_cursor += h + UiPx(metrics, 6.0f);
+        }
+        auto wrapped = wrap_lines(section.text, inner.w);
+        for (const auto& l : wrapped) {
+            if (body_font) {
+                int h = 0;
+                TTF_SizeUTF8(body_font, l.c_str(), nullptr, &h);
+                lines.emplace_back(l, y_cursor);
+                y_cursor += h + UiPx(metrics, 4.0f);
+            }
+        }
+        y_cursor += UiPx(metrics, 14.0f);
+    }
+
+    state.max_scroll = std::max(0, y_cursor - inner.h);
+    state.scroll = std::clamp(state.scroll, 0, std::max(0, state.max_scroll));
+
+    SDL_Rect clip = inner;
+    SDL_RenderSetClipRect(renderer, &clip);
+    const int text_x = inner.x + UiPx(metrics, 8.0f);
+    for (const auto& [text, base_y] : lines) {
+        if (!body_font) {
+            continue;
+        }
+        SDL_Surface* surf = TTF_RenderUTF8_Blended(body_font, text.c_str(), kTextPrimary);
+        if (!surf) {
+            continue;
+        }
+        SDL_Texture* tex = SDL_CreateTextureFromSurface(renderer, surf);
+        SDL_Rect dst{text_x,
+                     inner.y + base_y - state.scroll,
+                     surf->w,
+                     surf->h};
+        SDL_RenderCopy(renderer, tex, nullptr, &dst);
+        SDL_DestroyTexture(tex);
+        SDL_FreeSurface(surf);
+    }
+    SDL_RenderSetClipRect(renderer, nullptr);
+
+    if (state.max_scroll > 0) {
+        SDL_Rect track{inner.x + inner.w + UiPx(metrics, 12.0f), inner.y, UiPx(metrics, 10.0f), inner.h};
+        float ratio = static_cast<float>(inner.h) / static_cast<float>(inner.h + state.max_scroll);
+        int thumb_h = std::max(UiPx(metrics, 24.0f), static_cast<int>(track.h * ratio));
+        int max_scroll = std::max(1, state.max_scroll);
+        int thumb_y = track.y + static_cast<int>((static_cast<float>(state.scroll) / static_cast<float>(max_scroll)) * (track.h - thumb_h));
+        SDL_Rect thumb{track.x, thumb_y, track.w, thumb_h};
+        SDL_SetRenderDrawColor(renderer, kPanelBorder.r, kPanelBorder.g, kPanelBorder.b, 255);
+        SDL_RenderFillRect(renderer, &track);
+        SDL_SetRenderDrawColor(renderer, kButtonHighlight.r, kButtonHighlight.g, kButtonHighlight.b, 255);
+        SDL_RenderFillRect(renderer, &thumb);
+    }
+
+    SDL_Rect back_rect{panel.x + UiPx(metrics, 24.0f),
+                       panel.y + panel.h - UiPx(metrics, 60.0f),
+                       panel.w - UiPx(metrics, 48.0f),
+                       UiPx(metrics, 48.0f)};
+    state.back_button = back_rect;
+    const bool hovered = state.back_hovered;
+    SDL_Color back_fill = hovered ? kButtonHighlight : kButtonFill;
+    SDL_Color back_border = kPanelBorder;
+    DrawPanel(renderer, back_rect, back_fill, back_border);
+    if (body_font) {
+        RenderCenteredText(renderer,
+                           body_font,
+                           back_rect.x + back_rect.w / 2,
+                           back_rect.y + (back_rect.h - FontPixelHeight(body_font)) / 2,
+                           "BACK",
+                           kTextPrimary);
+    }
+
+    std::string hint = "Mouse wheel to scroll | Enter/Click back | Esc to return";
+    DrawControlHint(renderer, fonts, metrics, panel, hint);
 }
 
 void RenderTimeMode(SDL_Renderer* renderer,
@@ -825,6 +1037,7 @@ BlitzSettingsAction HandleBlitzSettingsEvent(BlitzSettingsState& state,
         } else if (state.selected == 1) {
             state.between_seconds = std::clamp(state.between_seconds + delta, 0, 30);
         }
+        return delta != 0;
     };
 
     auto activate = [&]() -> BlitzSettingsAction {
@@ -850,7 +1063,9 @@ BlitzSettingsAction HandleBlitzSettingsEvent(BlitzSettingsState& state,
                     if (PointInRect(state.button_bounds[static_cast<std::size_t>(i)], evt.x, evt.y)) {
                         state.selected = i;
                         if (state.selected <= 1) {
-                            adjust(+1);
+                            if (adjust(+1)) {
+                                return BlitzSettingsAction::Adjust;
+                            }
                             return BlitzSettingsAction::None;
                         }
                         return activate();
@@ -858,7 +1073,9 @@ BlitzSettingsAction HandleBlitzSettingsEvent(BlitzSettingsState& state,
                 }
             } else if (evt.mouse_button == match::platform::MouseButton::Right) {
                 if (state.selected <= 1) {
-                    adjust(-1);
+                    if (adjust(-1)) {
+                        return BlitzSettingsAction::Adjust;
+                    }
                 } else {
                     return BlitzSettingsAction::Back;
                 }
@@ -872,9 +1089,13 @@ BlitzSettingsAction HandleBlitzSettingsEvent(BlitzSettingsState& state,
             } else if (evt.key == KeyCode::Up || evt.key == KeyCode::W) {
                 MoveSelection(state.selected, -1, 3);
             } else if (evt.key == KeyCode::Left || evt.key == KeyCode::A) {
-                adjust(-1);
+                if (adjust(-1)) {
+                    return BlitzSettingsAction::Adjust;
+                }
             } else if (evt.key == KeyCode::Right || evt.key == KeyCode::D) {
-                adjust(+1);
+                if (adjust(+1)) {
+                    return BlitzSettingsAction::Adjust;
+                }
             } else if (evt.key == KeyCode::Enter) {
                 return activate();
             } else if (evt.key == KeyCode::Escape) {
@@ -893,11 +1114,15 @@ BlitzSettingsAction HandleBlitzSettingsEvent(BlitzSettingsState& state,
                     break;
                 case ControllerButton::DPadLeft:
                 case ControllerButton::X:
-                    adjust(-1);
+                    if (adjust(-1)) {
+                        return BlitzSettingsAction::Adjust;
+                    }
                     break;
                 case ControllerButton::DPadRight:
                 case ControllerButton::Y:
-                    adjust(+1);
+                    if (adjust(+1)) {
+                        return BlitzSettingsAction::Adjust;
+                    }
                     break;
                 case ControllerButton::A:
                     return activate();
@@ -1755,6 +1980,9 @@ void SettingsState::RefreshEntries() {
         entries.push_back(Entry{EntryType::PlayerCount, -1});
     }
     for (int i = 0; i < settings.player_count; ++i) {
+        if (settings.player_is_cpu(i)) {
+            continue;
+        }
         entries.push_back(Entry{EntryType::PlayerName, i});
     }
     entries.push_back(Entry{EntryType::MovesPerRound, -1});
@@ -1850,6 +2078,9 @@ bool AdjustSetting(SettingsState& state, const SettingsState::Entry& entry, int 
 SettingsAction ActivateEntry(SettingsState& state, const SettingsState::Entry& entry) {
     switch (entry.type) {
         case SettingsState::EntryType::PlayerName:
+            if (state.settings.player_is_cpu(entry.index)) {
+                return SettingsAction::None;
+            }
             state.pending_player_index = entry.index;
             return SettingsAction::EditPlayerName;
         case SettingsState::EntryType::PlayerCount:
@@ -1888,9 +2119,10 @@ std::string DescribeSettingsEntry(const SettingsState& state, const SettingsStat
     switch (entry.type) {
         case SettingsState::EntryType::PlayerName:
             if (entry.index >= 0 && entry.index < static_cast<int>(state.settings.player_names.size())) {
-                return state.settings.player_is_cpu(entry.index) ? "Rename the computer opponent"
-                                                                 : "Set the display name for player " +
-                                                                       std::to_string(entry.index + 1);
+                if (state.settings.player_is_cpu(entry.index)) {
+                    return "Computer name is fixed";
+                }
+                return "Set the display name for player " + std::to_string(entry.index + 1);
             }
             return "Set player name";
         case SettingsState::EntryType::PlayerCount:
@@ -1948,6 +2180,9 @@ SettingsAction HandleSettingsEvent(SettingsState& state,
     if (total == 0) {
         return SettingsAction::None;
     }
+    state.had_adjustment = false;
+    state.last_selected_snapshot = state.selected;
+    state.back_via_escape = false;
     UiMetrics metrics = ComputeUiMetrics(window_width, window_height);
     const int visible_count = ComputeSettingsVisibleCount(metrics);
     ClampSettingsScroll(state, visible_count);
@@ -1992,7 +2227,9 @@ SettingsAction HandleSettingsEvent(SettingsState& state,
                 if (set_selection_from_point(evt.x, evt.y)) {
                     const auto& entry = current_entry();
                     if (EntryAcceptsAdjustment(entry)) {
-                        AdjustSetting(state, entry, +1);
+                        if (AdjustSetting(state, entry, +1)) {
+                            state.had_adjustment = true;
+                        }
                         return SettingsAction::None;
                     }
                     set_activation_source(false);
@@ -2001,7 +2238,9 @@ SettingsAction HandleSettingsEvent(SettingsState& state,
             } else if (evt.mouse_button == match::platform::MouseButton::Right) {
                 const auto& entry = current_entry();
                 if (EntryAcceptsAdjustment(entry)) {
-                    AdjustSetting(state, entry, -1);
+                    if (AdjustSetting(state, entry, -1)) {
+                        state.had_adjustment = true;
+                    }
                 } else {
                     set_activation_source(false);
                     return SettingsAction::Back;
@@ -2017,14 +2256,19 @@ SettingsAction HandleSettingsEvent(SettingsState& state,
                 MoveSelection(state.selected, -1, total);
                 ClampSettingsScroll(state, visible_count);
             } else if (evt.key == KeyCode::Left || evt.key == KeyCode::A) {
-                AdjustSetting(state, current_entry(), -1);
+                if (AdjustSetting(state, current_entry(), -1)) {
+                    state.had_adjustment = true;
+                }
             } else if (evt.key == KeyCode::Right || evt.key == KeyCode::D) {
-                AdjustSetting(state, current_entry(), +1);
+                if (AdjustSetting(state, current_entry(), +1)) {
+                    state.had_adjustment = true;
+                }
             } else if (evt.key == KeyCode::Enter) {
                 set_activation_source(false);
                 return ActivateEntry(state, current_entry());
             } else if (evt.key == KeyCode::Escape) {
                 set_activation_source(false);
+                state.back_via_escape = true;
                 return SettingsAction::Back;
             }
             break;
@@ -2042,11 +2286,15 @@ SettingsAction HandleSettingsEvent(SettingsState& state,
                     break;
                 case ControllerButton::DPadLeft:
                 case ControllerButton::X:
-                    AdjustSetting(state, current_entry(), -1);
+                    if (AdjustSetting(state, current_entry(), -1)) {
+                        state.had_adjustment = true;
+                    }
                     break;
                 case ControllerButton::DPadRight:
                 case ControllerButton::Y:
-                    AdjustSetting(state, current_entry(), +1);
+                    if (AdjustSetting(state, current_entry(), +1)) {
+                        state.had_adjustment = true;
+                    }
                     break;
                 case ControllerButton::A:
                     set_activation_source(true);
@@ -2099,6 +2347,11 @@ SettingsAction HandleSettingsEvent(SettingsState& state,
 
     if (!using_controller) {
         state.last_activation_from_controller = false;
+    }
+
+    if (state.selected != state.last_selected_snapshot && !state.had_adjustment) {
+        // Selection moved by navigation; the caller will play click on activation only.
+        state.had_adjustment = false;
     }
 
     return SettingsAction::None;
@@ -2166,7 +2419,8 @@ void RenderSettings(SDL_Renderer* renderer,
                     mutable_state.settings.player_names.empty()
                         ? nullptr
                         : &mutable_state.settings.player_names[static_cast<std::size_t>(entry.index)];
-                show_player_cursor = (target == text_input_state->target);
+                show_player_cursor = (!mutable_state.settings.player_is_cpu(entry.index) &&
+                                      target == text_input_state->target);
             }
             std::string label;
             switch (entry.type) {
@@ -2175,9 +2429,6 @@ void RenderSettings(SDL_Renderer* renderer,
                         (entry.index >= 0 && entry.index < static_cast<int>(mutable_state.settings.player_names.size()))
                             ? mutable_state.settings.player_names[static_cast<std::size_t>(entry.index)]
                             : match::ui::MakeDefaultPlayerName(entry.index);
-                    if (mutable_state.settings.player_is_cpu(entry.index)) {
-                        name += " (Computer)";
-                    }
                     label = "Player " + std::to_string(entry.index + 1) + " name: " + name;
                     break;
                 }
