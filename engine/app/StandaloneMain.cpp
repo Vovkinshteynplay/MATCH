@@ -3835,6 +3835,9 @@ int main(int /*argc*/, char* /*argv*/[]) {
             }
 
             switch (current_screen) {
+                case AppScreen::Intro: {
+                    break;
+                }
                 case AppScreen::MainMenu: {
                     auto action =
                         match::ui::HandleMenuEvent(menu_state, evt, using_controller, current_w, current_h);
@@ -3990,6 +3993,8 @@ int main(int /*argc*/, char* /*argv*/[]) {
                             if (!name_prompt_state.input.empty()) {
                                 name_prompt_state.input.pop_back();
                             }
+                            break;
+                        case match::ui::NamePromptAction::Character:
                             break;
                         case match::ui::NamePromptAction::Cancel:
                             PlayClickSound();
